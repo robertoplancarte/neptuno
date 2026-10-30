@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strings"
 
 	"github.com/robertoplancarte/neptuno/internal/orchestrate"
 	"github.com/robertoplancarte/neptuno/internal/project"
@@ -31,6 +33,8 @@ type Options struct {
 	Port int
 	// NoGenerate skips the stack's generate command.
 	NoGenerate bool
+	// With and Without select the stack's options on top of its defaults.
+	With, Without []string
 }
 
 // Adder adds repos to a project.
@@ -70,6 +74,12 @@ func (a *Adder) Add(opts Options) error {
 	data := stacks.Data{Name: name, Project: p.Name, Port: stack.Port}
 	if opts.Port > 0 {
 		data.Port = opts.Port
+	}
+	if data, err = stack.Select(data, opts.With, opts.Without); err != nil {
+		return err
+	}
+	if chosen := selectedOptions(data); len(chosen) > 0 {
+		fmt.Fprintf(a.Log, "Options: %s\n", strings.Join(chosen, ", "))
 	}
 
 	// 1. The source code.
@@ -120,7 +130,7 @@ func (a *Adder) Add(opts Options) error {
 	}
 
 	// 3. compose.yml and the Caddyfile.
-	if err := a.addComposeService(name, stack); err != nil {
+	if err := a.addComposeService(name, stack.ServicesFor(data)); err != nil {
 		return err
 	}
 	if err := a.addCaddySite(name, data.Port); err != nil {
@@ -197,7 +207,7 @@ func (a *Adder) writeIfMissing(rel string, content []byte) error {
 	return nil
 }
 
-func (a *Adder) addComposeService(name string, stack *stacks.Stack) error {
+func (a *Adder) addComposeService(name string, services []string) error {
 	p := a.Project
 	if ok, err := composeHasService(p.Path("compose.yml"), name); err != nil || ok {
 		if ok {
@@ -206,7 +216,7 @@ func (a *Adder) addComposeService(name string, stack *stacks.Stack) error {
 		return err
 	}
 	var deps []string
-	for _, s := range stack.Services {
+	for _, s := range services {
 		if _, ok := p.Services[s]; ok {
 			deps = append(deps, s)
 		}
@@ -256,7 +266,7 @@ func (a *Adder) generate(stack *stacks.Stack, data stacks.Data) error {
 		return err
 	}
 	if a.Runner.LookPath("docker") != nil {
-		return fmt.Errorf("the %s stack runs its generator in docker, which was not found; rerun `neptuno add %s --stack %s` once it is installed", stack.Name, data.Name, stack.Name)
+		return fmt.Errorf("the %s stack runs its generator in docker, which was not found; rerun `%s` once it is installed", stack.Name, rerun(stack, data))
 	}
 
 	// Reload so the new repo and service are known, then write env files:
@@ -281,9 +291,41 @@ func (a *Adder) generate(stack *stacks.Stack, data stacks.Data) error {
 	fmt.Fprintf(a.Log, "Generating the %s app in its container: %s\n", stack.Name, command)
 	err = a.Runner.Run(p.Root, "docker", "compose", "run", "--rm", "--no-deps", "--build", data.Name, "sh", "-c", command)
 	if err != nil {
-		return fmt.Errorf("%w\nFix the problem, empty repos/%s, and rerun `neptuno add %s --stack %s`; finished steps are skipped", err, data.Name, data.Name, stack.Name)
+		return fmt.Errorf("%w\nFix the problem, empty repos/%s, and rerun `%s`; finished steps are skipped", err, data.Name, rerun(stack, data))
 	}
 	return nil
+}
+
+// rerun is the `neptuno add` command that repeats this one's choices.
+func rerun(stack *stacks.Stack, data stacks.Data) string {
+	command := fmt.Sprintf("neptuno add %s --stack %s", data.Name, stack.Name)
+	var with, without []string
+	for _, name := range stack.OptionNames() {
+		if data.Options[name] {
+			with = append(with, name)
+		} else {
+			without = append(without, name)
+		}
+	}
+	if len(with) > 0 {
+		command += " --with " + strings.Join(with, ",")
+	}
+	if len(without) > 0 {
+		command += " --without " + strings.Join(without, ",")
+	}
+	return command
+}
+
+// selectedOptions lists the options data selects, sorted.
+func selectedOptions(data stacks.Data) []string {
+	var out []string
+	for name, on := range data.Options {
+		if on {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func isEmptyDir(dir string) bool {

@@ -36,6 +36,12 @@ type picker struct {
 	selected map[string]bool
 	done     bool
 	err      string
+
+	// descriptions are shown next to item names; allowEmpty lets enter
+	// accept no selection; action names what enter does.
+	descriptions map[string]string
+	allowEmpty   bool
+	action       string
 }
 
 var (
@@ -122,7 +128,7 @@ func (m *picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "enter":
-		if len(m.Selection()) == 0 {
+		if len(m.Selection()) == 0 && !m.allowEmpty {
 			m.err = "Select at least one service with space."
 			return m, nil
 		}
@@ -163,6 +169,9 @@ func (m *picker) View() string {
 			box = "[x]"
 		}
 		line := fmt.Sprintf("%s %s", box, it.name)
+		if d := m.descriptions[it.name]; d != "" {
+			line += "  " + helpStyle.Render(d)
+		}
 		if i == m.cursor {
 			b.WriteString(cursorStyle.Render("> "+line) + "\n")
 		} else {
@@ -176,7 +185,11 @@ func (m *picker) View() string {
 	if m.err != "" {
 		b.WriteString("\n" + errStyle.Render(m.err) + "\n")
 	}
-	b.WriteString("\n" + helpStyle.Render("space select · a all · enter start · q cancel") + "\n")
+	action := m.action
+	if action == "" {
+		action = "start"
+	}
+	b.WriteString("\n" + helpStyle.Render("space select · a all · enter "+action+" · q cancel") + "\n")
 	return b.String()
 }
 
@@ -201,6 +214,21 @@ func (m *picker) dependencies() string {
 		return ""
 	}
 	return "Also starts dependencies: " + strings.Join(extra, ", ")
+}
+
+// PickOptions shows a checklist of a stack's options, with descriptions,
+// and returns the chosen names, which may be none, or ErrCancelled.
+func PickOptions(title string, names []string, descriptions map[string]string, preselected []string) ([]string, error) {
+	m := newPicker(PickerOptions{Title: title, Repos: names, Preselected: preselected})
+	m.items[0].name = "Options"
+	m.descriptions, m.allowEmpty, m.action = descriptions, true, "add"
+	if _, err := tea.NewProgram(m).Run(); err != nil {
+		return nil, err
+	}
+	if !m.done {
+		return nil, ErrCancelled
+	}
+	return m.Selection(), nil
 }
 
 // PickServices shows a checklist of repos and services and returns the

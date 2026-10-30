@@ -2,13 +2,19 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
+
+	"github.com/mattn/go-isatty"
 
 	"github.com/robertoplancarte/neptuno/internal/add"
 	"github.com/robertoplancarte/neptuno/internal/orchestrate"
+	"github.com/robertoplancarte/neptuno/internal/project"
 	"github.com/robertoplancarte/neptuno/internal/scaffold"
 	"github.com/robertoplancarte/neptuno/internal/stacks"
+	"github.com/robertoplancarte/neptuno/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -28,6 +34,7 @@ func newAddCommand() *cobra.Command {
 			"Run `neptuno stacks` to list stacks; a project's stacks/<name>/ folders add\n" +
 			"to and override the built-in ones.",
 		Example: "  neptuno add api git@github.com:acme/api.git --stack rails\n" +
+			"  neptuno add shop --stack rails --with action_text,storage_s3\n" +
 			"  neptuno add web --stack node\n" +
 			"  neptuno add worker",
 		Args: cobra.RangeArgs(1, 2),
@@ -40,6 +47,9 @@ func newAddCommand() *cobra.Command {
 			if len(args) == 2 {
 				opts.URL = args[1]
 			}
+			if err := pickOptions(cmd, p, &opts); err != nil {
+				return err
+			}
 			a := &add.Adder{
 				Project: p,
 				Runner:  orchestrate.ExecRunner{Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr()},
@@ -51,7 +61,51 @@ func newAddCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&opts.Stack, "stack", "s", "", "stack template to use (default \""+stacks.Default+"\")")
 	cmd.Flags().IntVarP(&opts.Port, "port", "p", 0, "dev server port, overriding the stack's")
 	cmd.Flags().BoolVar(&opts.NoGenerate, "no-generate", false, "skip the stack's app generator")
+	cmd.Flags().StringSliceVarP(&opts.With, "with", "w", nil, "stack options to turn on, such as --with action_text,storage_s3")
+	cmd.Flags().StringSliceVar(&opts.Without, "without", nil, "stack options to turn off, such as --without tailwind")
 	return cmd
+}
+
+// pickOptions shows a checklist of the stack's options when it has some,
+// neither --with nor --without was given, and the terminal is interactive.
+func pickOptions(cmd *cobra.Command, p *project.Project, opts *add.Options) error {
+	if cmd.Flags().Changed("with") || cmd.Flags().Changed("without") ||
+		!isatty.IsTerminal(os.Stdin.Fd()) || !isatty.IsTerminal(os.Stdout.Fd()) {
+		return nil
+	}
+	name := opts.Stack
+	if name == "" {
+		name = stacks.Default
+	}
+	s, err := stacks.Get(p.Path("stacks"), name)
+	if err != nil || len(s.Options) == 0 {
+		return err
+	}
+	var names, defaults []string
+	descriptions := map[string]string{}
+	for _, o := range s.Options {
+		names = append(names, o.Name)
+		descriptions[o.Name] = o.Description
+		if o.Default {
+			defaults = append(defaults, o.Name)
+		}
+	}
+	chosen, err := tui.PickOptions(fmt.Sprintf("Options for %s (%s stack)", opts.Name, s.Name), names, descriptions, defaults)
+	if err != nil {
+		return err
+	}
+	on := map[string]bool{}
+	for _, c := range chosen {
+		on[c] = true
+	}
+	for _, n := range names {
+		if on[n] {
+			opts.With = append(opts.With, n)
+		} else {
+			opts.Without = append(opts.Without, n)
+		}
+	}
+	return nil
 }
 
 func newStacksCommand() *cobra.Command {
@@ -81,7 +135,11 @@ func newStacksCommand() *cobra.Command {
 				if s.Extends != "" {
 					source += " (extends " + s.Extends + ")"
 				}
-				fmt.Fprintf(w, "%s\t%d\t%s\t%s\n", s.Name, s.Port, source, s.Description)
+				desc := s.Description
+				if len(s.Options) > 0 {
+					desc += " (options: " + strings.Join(s.OptionNames(), ", ") + ")"
+				}
+				fmt.Fprintf(w, "%s\t%d\t%s\t%s\n", s.Name, s.Port, source, desc)
 			}
 			return w.Flush()
 		},
