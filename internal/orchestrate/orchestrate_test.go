@@ -3,6 +3,7 @@ package orchestrate
 import (
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -160,17 +161,9 @@ func TestUp(t *testing.T) {
 	want := []string{
 		"docker compose up --detach postgres api valkey web",
 		"overmind start --daemonize --any-can-die -f ROOT/.neptuno/procfiles/api/Procfile -d ROOT -s .neptuno/run/api.sock -w acme-api",
-		"tmux new-session -d -s neptuno-acme -n api -c ROOT " +
-			"while overmind status -s .neptuno/run/api.sock >/dev/null 2>&1; do env -u TMUX overmind connect -s .neptuno/run/api.sock; " +
-			"overmind status -s .neptuno/run/api.sock >/dev/null 2>&1 || break; " +
-			`echo; echo "Detached from api's processes. Press enter to reconnect."; read _; done; ` +
-			`echo; echo "overmind for api has stopped. Press enter to close this window."; read _`,
+		"tmux new-session -d -s neptuno-acme -n api -c ROOT " + o.connectCommand("api"),
 		"overmind start --daemonize --any-can-die -f ROOT/.neptuno/procfiles/docs/Procfile -d ROOT -s .neptuno/run/docs.sock -w acme-docs",
-		"tmux new-window -d -t =neptuno-acme: -n docs -c ROOT " +
-			"while overmind status -s .neptuno/run/docs.sock >/dev/null 2>&1; do env -u TMUX overmind connect -s .neptuno/run/docs.sock; " +
-			"overmind status -s .neptuno/run/docs.sock >/dev/null 2>&1 || break; " +
-			`echo; echo "Detached from docs's processes. Press enter to reconnect."; read _; done; ` +
-			`echo; echo "overmind for docs has stopped. Press enter to close this window."; read _`,
+		"tmux new-window -d -t =neptuno-acme: -n docs -c ROOT " + o.connectCommand("docs"),
 		"attach: tmux attach-session -t =neptuno-acme",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -241,6 +234,13 @@ func TestUpRestartsOvermindWhenContainerIsRecreated(t *testing.T) {
 	want := []string{"docker compose", "overmind quit", "tmux kill-window", "overmind start", "tmux new-window"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("commands:\n%s\nwant prefixes %v", strings.Join(f.cmds, "\n"), want)
+	}
+}
+
+func TestConnectCommandIsValidShell(t *testing.T) {
+	o, _ := setup(t)
+	if out, err := exec.Command("sh", "-n", "-c", o.connectCommand("api")).CombinedOutput(); err != nil {
+		t.Fatalf("sh -n: %v\n%s", err, out)
 	}
 }
 
