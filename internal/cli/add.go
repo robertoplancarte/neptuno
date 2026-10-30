@@ -2,10 +2,12 @@ package cli
 
 import (
 	"fmt"
+	"path/filepath"
 	"text/tabwriter"
 
 	"github.com/robertoplancarte/neptuno/internal/add"
 	"github.com/robertoplancarte/neptuno/internal/orchestrate"
+	"github.com/robertoplancarte/neptuno/internal/scaffold"
 	"github.com/robertoplancarte/neptuno/internal/stacks"
 	"github.com/spf13/cobra"
 )
@@ -53,14 +55,17 @@ func newAddCommand() *cobra.Command {
 }
 
 func newStacksCommand() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "stacks",
 		Short: "List the stacks `neptuno add --stack` can use",
-		Args:  cobra.NoArgs,
+		Long: "Lists built-in stacks and the project's own stacks/<name>/ folders, which\n" +
+			"add to and override the built-ins. A stack.yml with `extends: <name>` starts\n" +
+			"from that stack and only needs the settings and files it changes.",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			dir := ""
+			dir, root := "", ""
 			if p, err := loadProject(); err == nil {
-				dir = p.Path("stacks")
+				dir, root = p.Path("stacks"), p.Root
 			}
 			list, err := stacks.List(dir)
 			if err != nil {
@@ -69,9 +74,59 @@ func newStacksCommand() *cobra.Command {
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 			fmt.Fprintln(w, "STACK\tPORT\tSOURCE\tDESCRIPTION")
 			for _, s := range list {
-				fmt.Fprintf(w, "%s\t%d\t%s\t%s\n", s.Name, s.Port, s.Source, s.Description)
+				source := s.Source
+				if rel, err := filepath.Rel(root, source); err == nil && root != "" && source != stacks.BuiltIn {
+					source = filepath.ToSlash(rel)
+				}
+				if s.Extends != "" {
+					source += " (extends " + s.Extends + ")"
+				}
+				fmt.Fprintf(w, "%s\t%d\t%s\t%s\n", s.Name, s.Port, source, s.Description)
 			}
 			return w.Flush()
+		},
+	}
+	cmd.AddCommand(newStacksCopyCommand())
+	return cmd
+}
+
+func newStacksCopyCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "copy <stack> [new-name]",
+		Short: "Copy a stack into stacks/ to customize it",
+		Long: "Writes every file of a stack, merged with any stack it extends, into\n" +
+			"stacks/<new-name>/ (default: the same name, which overrides the original).\n" +
+			"For small changes, a stacks/<name>/stack.yml with `extends:` and only the\n" +
+			"files you change is usually enough.",
+		Example: "  neptuno stacks copy rails             # override the built-in rails stack\n" +
+			"  neptuno stacks copy rails rails-api   # a new stack based on rails",
+		Args: cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := loadProject()
+			if err != nil {
+				return err
+			}
+			s, err := stacks.Get(p.Path("stacks"), args[0])
+			if err != nil {
+				return err
+			}
+			target := args[0]
+			if len(args) == 2 {
+				target = args[1]
+			}
+			if err := scaffold.ValidateName(target); err != nil {
+				return err
+			}
+			files, err := s.Copy(p.Path("stacks", target))
+			if err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "Copied the %s stack (%s) to stacks/%s/\n", s.Name, s.Source, target)
+			for _, f := range files {
+				fmt.Fprintf(out, "  %s\n", f)
+			}
+			return nil
 		},
 	}
 }
