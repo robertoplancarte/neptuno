@@ -14,3 +14,8 @@ RUN curl -fsSL https://claude.ai/install.sh -o /tmp/install-claude.sh \
  && /root/.local/bin/claude --version
 ENV PATH="/root/.local/bin:$PATH" CLAUDE_CONFIG_DIR=/root/.claude
 WORKDIR /app
+
+# bundle install and db:prepare run when the container starts; Neptuno waits
+# for them before starting the Procfile's processes.
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+ENTRYPOINT ["sh", "/usr/local/bin/entrypoint.sh"]

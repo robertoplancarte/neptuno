@@ -61,8 +61,8 @@ app, and `rails` runs `rails new` inside the new container, so you don't need
 Ruby installed. Existing files are never overwritten, so `add` can be rerun.
 
 Stacks are folders with a `stack.yml` (description, port, shared services,
-optional `generate` command, optional `extends`), a `Dockerfile`, a `Procfile`,
-a `base.env` and an optional `app/` of starter files, all Go templates with
+optional `generate` command, optional `extends`), a `Dockerfile`, an optional
+`entrypoint.sh`, a `Procfile`, a `base.env` and an optional `app/` of starter files, all Go templates with
 `{{.Name}}`, `{{.Project}}` and `{{.Port}}`. Put your own in `stacks/<name>/` in
 the project to add stacks or override the built-in ones.
 
@@ -83,11 +83,11 @@ generate: >-
 
 ```
 # stacks/rails/Procfile
-web: bundle install && bin/rails db:prepare && rm -f tmp/pids/server.pid && bin/rails server -b 0.0.0.0 -p {{.Port}}
-css: until bundle check >/dev/null 2>&1; do sleep 2; done; bin/rails tailwindcss:watch
+web: bin/rails server -b 0.0.0.0 -p {{.Port}}
+css: bin/rails tailwindcss:watch
 ```
 
-The Dockerfile and base.env still come from the built-in stack. To start from a
+The Dockerfile, entrypoint.sh and base.env still come from the built-in stack. To start from a
 full copy instead, run `neptuno stacks copy rails` (or `neptuno stacks copy
 rails rails-tailwind` for a new stack next to the original).
 
@@ -105,7 +105,10 @@ Containers start with `docker compose up --detach`. Each repo with a
 `procfiles/<repo>/Procfile` gets an overmind window in the `neptuno-<project>`
 tmux session, with every Procfile line wrapped in `docker compose exec <repo>`,
 and Neptuno attaches you to that session. `neptuno down [service...]` stops
-them again.
+them again. Run with no arguments inside a repo's folder under `environments/`,
+`dockerfiles/`, `procfiles/` or `repos/`, `up`, `down` and `env show` act on
+that repo. You need docker, tmux and
+[overmind](https://github.com/DarthSim/overmind) installed.
 
 Overmind runs in the background with `--any-can-die`, so a process that
 crashes or exits leaves the rest running, and it gives every process its own
@@ -114,10 +117,19 @@ is nested inside Neptuno's, so press the prefix twice to reach it (`Ctrl-b
 Ctrl-b n` for the next process, `Ctrl-b Ctrl-b d` to detach). Detaching or
 closing the repo's window leaves its processes running, and the next
 `neptuno up` reconnects to them. Restart a dead process with
-`overmind restart -s .neptuno/run/<repo>.sock <process>`. Run with no arguments inside a repo's folder under `environments/`,
-`dockerfiles/`, `procfiles/` or `repos/`, `up`, `down` and `env show` act on
-that repo. You need docker, tmux and
-[overmind](https://github.com/DarthSim/overmind) installed.
+`overmind restart -s .neptuno/run/<repo>.sock <process>`.
+
+### Setup at container start
+
+Setup that has to finish before any process starts, such as `bundle install`
+and `bin/rails db:prepare` in the `rails` stack, goes in
+`dockerfiles/<repo>/entrypoint.sh`, which the Dockerfile sets as its
+`ENTRYPOINT`. It runs each time the container starts. When a repo has an
+`entrypoint.sh`, its processes wait until the script touches
+`/dev/shm/neptuno-ready`, or stop with an error if it touches
+`/dev/shm/neptuno-failed`; its output is in `docker compose logs <repo>`. The
+script ends with `exec "$@"` so the container goes on to run its command.
+Rebuild the image (`docker compose build <repo>`) after changing it.
 
 ## Claude Code in your containers
 

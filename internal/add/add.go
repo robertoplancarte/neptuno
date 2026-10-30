@@ -90,12 +90,19 @@ func (a *Adder) Add(opts Options) error {
 	}
 
 	// 2. The companion files.
-	for _, f := range []struct{ stackFile, target string }{
-		{"Dockerfile", filepath.Join("dockerfiles", name, "Dockerfile")},
-		{"Procfile", filepath.Join("procfiles", name, "Procfile")},
-		{"base.env", filepath.Join("environments", name, "base.env")},
+	for _, f := range []struct {
+		stackFile, target string
+		optional          bool
+	}{
+		{"Dockerfile", filepath.Join("dockerfiles", name, "Dockerfile"), false},
+		{"entrypoint.sh", filepath.Join("dockerfiles", name, "entrypoint.sh"), true},
+		{"Procfile", filepath.Join("procfiles", name, "Procfile"), false},
+		{"base.env", filepath.Join("environments", name, "base.env"), false},
 	} {
 		content, err := stack.Render(f.stackFile, data)
+		if errors.Is(err, fs.ErrNotExist) && f.optional {
+			continue
+		}
 		if errors.Is(err, fs.ErrNotExist) {
 			fmt.Fprintf(a.Log, "warning: the %s stack has no %s, so %s was not written (add `extends:` to its stack.yml to inherit one)\n", stack.Name, f.stackFile, filepath.ToSlash(f.target))
 			continue

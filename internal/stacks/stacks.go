@@ -5,6 +5,8 @@
 //	             optional generator command run in the new container, and
 //	             an optional stack it extends
 //	Dockerfile   the development image
+//	entrypoint.sh  setup run at container start, such as bundle install
+//	             (optional); Procfile processes wait for it
 //	Procfile     the processes overmind runs
 //	base.env     the repo's base environment
 //	app/         files copied into a brand-new repo (optional); a .tmpl

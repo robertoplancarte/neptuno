@@ -202,7 +202,8 @@ func (o *Orchestrator) writeProcfile(repo string) (bool, error) {
 	if p.RunMode(repo) == project.RunHost {
 		entries = procfile.WrapHost(entries, o.Neptuno, repo)
 	} else {
-		entries = procfile.WrapContainer(entries, repo)
+		_, err := os.Stat(p.Path("dockerfiles", repo, "entrypoint.sh"))
+		entries = procfile.WrapContainer(entries, repo, err == nil)
 	}
 	return true, procfile.Write(o.generatedProcfile(repo), entries)
 }

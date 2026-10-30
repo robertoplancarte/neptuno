@@ -190,7 +190,7 @@ func TestCopy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(paths, ",") != "Dockerfile,Procfile,base.env,stack.yml" {
+	if strings.Join(paths, ",") != "Dockerfile,Procfile,base.env,entrypoint.sh,stack.yml" {
 		t.Errorf("copied %v", paths)
 	}
 	yml, _ := os.ReadFile(filepath.Join(target, "stack.yml"))
