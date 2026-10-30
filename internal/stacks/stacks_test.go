@@ -93,3 +93,120 @@ func TestProjectStackOverridesBuiltin(t *testing.T) {
 		t.Error("folder without stack.yml counted as a stack")
 	}
 }
+
+func writeFiles(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+	for path, content := range files {
+		full := filepath.Join(dir, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestExtendsBuiltinOfSameName(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"rails/stack.yml": "extends: rails\ndescription: Rails with Tailwind\ngenerate: rails new . --css=tailwind\n",
+		"rails/Procfile":  "web: bin/rails s\ncss: bin/rails tailwindcss:watch\n",
+	})
+	s, err := Get(dir, "rails")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Description != "Rails with Tailwind" || s.Generate != "rails new . --css=tailwind" {
+		t.Errorf("own settings not applied: %+v", s)
+	}
+	if s.Port != 3000 || len(s.Services) != 3 {
+		t.Errorf("settings not inherited: port %d services %v", s.Port, s.Services)
+	}
+	if out, _ := s.Render("Procfile", Data{}); !strings.Contains(string(out), "tailwindcss:watch") {
+		t.Errorf("own Procfile not used: %s", out)
+	}
+	if out, err := s.Render("Dockerfile", Data{Name: "shop"}); err != nil || !strings.Contains(string(out), "FROM ruby:3.3") {
+		t.Errorf("Dockerfile not inherited: %v %s", err, out)
+	}
+}
+
+func TestExtendsChainAndAppFiles(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		// node-ts extends the built-in node and adds a file; api extends
+		// node-ts and clears the services.
+		"node-ts/stack.yml":         "extends: node\nport: 5173\n",
+		"node-ts/app/tsconfig.json": "{}\n",
+		"node-ts/app/server.js":     "// {{.Name}} in TypeScript soon\n",
+		"api/stack.yml":             "extends: node-ts\nservices: []\n",
+	})
+	s, err := Get(dir, "api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Port != 5173 || len(s.Services) != 0 {
+		t.Errorf("port %d services %v", s.Port, s.Services)
+	}
+	files, err := s.AppFiles(Data{Name: "x", Port: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(files["server.js"]) != "// x in TypeScript soon\n" {
+		t.Errorf("child app file did not win: %q", files["server.js"])
+	}
+	for _, f := range []string{"package.json", ".gitignore", "tsconfig.json"} {
+		if _, ok := files[f]; !ok {
+			t.Errorf("app/%s missing from merged files", f)
+		}
+	}
+}
+
+func TestExtendsErrors(t *testing.T) {
+	for name, files := range map[string]map[string]string{
+		"unknown parent":    {"a/stack.yml": "extends: nope\n"},
+		"cycle":             {"a/stack.yml": "extends: b\n", "b/stack.yml": "extends: a\n"},
+		"self, no built-in": {"mine/stack.yml": "extends: mine\n"},
+	} {
+		dir := t.TempDir()
+		writeFiles(t, dir, files)
+		if _, err := List(dir); err == nil {
+			t.Errorf("%s: List succeeded", name)
+		}
+	}
+}
+
+func TestCopy(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"rails/stack.yml": "extends: rails\ngenerate: rails new . --css=tailwind\n",
+	})
+	s, err := Get(dir, "rails")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "rails-copy")
+	paths, err := s.Copy(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(paths, ",") != "Dockerfile,Procfile,base.env,stack.yml" {
+		t.Errorf("copied %v", paths)
+	}
+	yml, _ := os.ReadFile(filepath.Join(target, "stack.yml"))
+	if strings.Contains(string(yml), "extends") || !strings.Contains(string(yml), "--css=tailwind") || !strings.Contains(string(yml), "port: 3000") {
+		t.Errorf("stack.yml not merged and standalone:\n%s", yml)
+	}
+
+	// The copy works on its own as a project stack.
+	copied, err := Get(filepath.Dir(target), "rails-copy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if copied.Generate != s.Generate || copied.Port != s.Port {
+		t.Errorf("copy resolves differently: %+v", copied)
+	}
+	if _, err := s.Copy(target); err == nil {
+		t.Error("Copy overwrote an existing folder")
+	}
+}

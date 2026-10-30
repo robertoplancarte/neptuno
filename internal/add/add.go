@@ -51,7 +51,11 @@ func (a *Adder) Add(opts Options) error {
 	if name == "_shared" {
 		return errors.New(`"_shared" is reserved for environments/_shared`)
 	}
-	if _, ok := p.Services[name]; ok && !p.IsRepo(name) {
+	inCompose, err := composeHasService(p.Path("compose.yml"), name)
+	if err != nil {
+		return err
+	}
+	if inCompose && !p.IsRepo(name) {
 		return fmt.Errorf("compose.yml already has a %q service that is not a repo; pick another name", name)
 	}
 
@@ -93,6 +97,7 @@ func (a *Adder) Add(opts Options) error {
 	} {
 		content, err := stack.Render(f.stackFile, data)
 		if errors.Is(err, fs.ErrNotExist) {
+			fmt.Fprintf(a.Log, "warning: the %s stack has no %s, so %s was not written (add `extends:` to its stack.yml to inherit one)\n", stack.Name, f.stackFile, filepath.ToSlash(f.target))
 			continue
 		}
 		if err != nil {
@@ -187,9 +192,11 @@ func (a *Adder) writeIfMissing(rel string, content []byte) error {
 
 func (a *Adder) addComposeService(name string, stack *stacks.Stack) error {
 	p := a.Project
-	if _, ok := p.Services[name]; ok {
-		fmt.Fprintf(a.Log, "  kept    compose.yml service %s\n", name)
-		return nil
+	if ok, err := composeHasService(p.Path("compose.yml"), name); err != nil || ok {
+		if ok {
+			fmt.Fprintf(a.Log, "  kept    compose.yml service %s\n", name)
+		}
+		return err
 	}
 	var deps []string
 	for _, s := range stack.Services {

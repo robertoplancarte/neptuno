@@ -2,7 +2,10 @@ package add
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"regexp"
 	"strings"
 
@@ -133,4 +136,24 @@ func appendCaddySite(src []byte, name string, port int) ([]byte, bool) {
 	}
 	out = append(out, fmt.Sprintf("# Added by `neptuno add %s`\n%s {\n\treverse_proxy %s:%d\n}\n", name, host, name, port)...)
 	return out, true
+}
+
+// composeHasService reports whether compose.yml itself, not an override
+// file, defines the service.
+func composeHasService(path, name string) (bool, error) {
+	src, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var cf struct {
+		Services map[string]any `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(src, &cf); err != nil {
+		return false, fmt.Errorf("compose.yml: %w", err)
+	}
+	_, ok := cf.Services[name]
+	return ok, nil
 }

@@ -167,3 +167,23 @@ func TestAddRejectsBadNames(t *testing.T) {
 		t.Error("unknown stack accepted")
 	}
 }
+
+func TestAddIgnoresServicesOnlyInOverride(t *testing.T) {
+	a, _ := newAdder(t)
+	root := a.Project.Root
+	override := "services:\n  web:\n    environment: {DEBUG: \"1\"}\n"
+	if err := os.WriteFile(filepath.Join(root, "compose.override.yml"), []byte(override), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := project.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Project = p
+	if err := a.Add(Options{Name: "web", Stack: "node"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(read(t, filepath.Join(root, "compose.yml")), "\n  web:\n") {
+		t.Error("web not added to compose.yml when an override already mentions it")
+	}
+}

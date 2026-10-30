@@ -61,10 +61,35 @@ app, and `rails` runs `rails new` inside the new container, so you don't need
 Ruby installed. Existing files are never overwritten, so `add` can be rerun.
 
 Stacks are folders with a `stack.yml` (description, port, shared services,
-optional `generate` command), a `Dockerfile`, a `Procfile`, a `base.env` and an
-optional `app/` of starter files, all Go templates with `{{.Name}}`,
-`{{.Project}}` and `{{.Port}}`. Put your own in `stacks/<name>/` in the project
-to add stacks or override the built-in ones.
+optional `generate` command, optional `extends`), a `Dockerfile`, a `Procfile`,
+a `base.env` and an optional `app/` of starter files, all Go templates with
+`{{.Name}}`, `{{.Project}}` and `{{.Port}}`. Put your own in `stacks/<name>/` in
+the project to add stacks or override the built-in ones.
+
+### Customizing a stack
+
+A stack with `extends:` inherits every setting and file it doesn't define, so
+an override only holds what changes. For example, Rails with Tailwind:
+
+```yaml
+# stacks/rails/stack.yml  (extends the built-in rails it overrides)
+extends: rails
+description: Rails 8 with Tailwind
+generate: >-
+  gem install rails -v '~> 8.0' --no-document &&
+  rails new . --name={{.Name}} --database=postgresql --css=tailwind
+  --skip-git --skip-docker --skip-kamal --skip-thruster
+```
+
+```
+# stacks/rails/Procfile
+web: bundle install && bin/rails db:prepare && rm -f tmp/pids/server.pid && bin/rails server -b 0.0.0.0 -p {{.Port}}
+css: until bundle check >/dev/null 2>&1; do sleep 2; done; bin/rails tailwindcss:watch
+```
+
+The Dockerfile and base.env still come from the built-in stack. To start from a
+full copy instead, run `neptuno stacks copy rails` (or `neptuno stacks copy
+rails rails-tailwind` for a new stack next to the original).
 
 ## Starting services
 
