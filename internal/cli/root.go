@@ -23,7 +23,13 @@ func NewRootCommand() *cobra.Command {
 			return tui.Run()
 		},
 	}
-	root.AddCommand(newInitCommand())
+	root.AddCommand(
+		newInitCommand(),
+		newUpCommand(),
+		newDownCommand(),
+		newEnvCommand(),
+		newHostExecCommand(),
+	)
 	return root
 }
 
