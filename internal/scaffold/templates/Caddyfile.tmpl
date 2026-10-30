@@ -1,0 +1,8 @@
+# Caddyfile for {{.Name}}, scaffolded by `neptuno init`.
+#
+# One site block per repo; `neptuno add` appends one. Sites use http:// so
+# Caddy skips its local certificate authority. Drop the prefix for HTTPS.
+
+http://s3.localhost {
+	reverse_proxy s3:8333
+}

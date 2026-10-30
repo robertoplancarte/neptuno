@@ -1,0 +1,14 @@
+# {{.Name}}
+
+Development environment managed by [Neptuno](https://github.com/robertoplancarte/neptuno).
+
+| Folder | Holds |
+| --- | --- |
+| `environments/<repo>/` | `base.env` plus one `<config>.env` per configuration |
+| `dockerfiles/<repo>/` | The development `Dockerfile` and an optional `entrypoint.sh` |
+| `procfiles/<repo>/` | The `Procfile` overmind runs |
+| `repos/<repo>/` | The repo's source, as a git submodule |
+
+`compose.yml` and `Caddyfile` are yours to edit. Shared services start out as
+Caddy (`http://<repo>.localhost`), PostgreSQL (`localhost:5432`), Valkey
+(`localhost:6379`) and SeaweedFS S3 (`localhost:8333`, `http://s3.localhost`).
