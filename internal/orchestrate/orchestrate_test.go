@@ -160,9 +160,9 @@ func TestUp(t *testing.T) {
 	}
 	want := []string{
 		"docker compose up --detach postgres api valkey web",
-		"overmind start --daemonize --any-can-die -f ROOT/.neptuno/procfiles/api/Procfile -d ROOT -s .neptuno/run/api.sock -w acme-api",
+		"overmind start --daemonize --any-can-die -f ROOT/.neptuno/procfiles/api/Procfile -d ROOT -s .neptuno/run/api.sock -w acme-api -F .neptuno/run/api.tmux.conf",
 		"tmux new-session -d -s neptuno-acme -n api -c ROOT " + o.connectCommand("api"),
-		"overmind start --daemonize --any-can-die -f ROOT/.neptuno/procfiles/docs/Procfile -d ROOT -s .neptuno/run/docs.sock -w acme-docs",
+		"overmind start --daemonize --any-can-die -f ROOT/.neptuno/procfiles/docs/Procfile -d ROOT -s .neptuno/run/docs.sock -w acme-docs -F .neptuno/run/docs.tmux.conf",
 		"tmux new-window -d -t =neptuno-acme: -n docs -c ROOT " + o.connectCommand("docs"),
 		"attach: tmux attach-session -t =neptuno-acme",
 	}
@@ -385,5 +385,43 @@ func TestClaudeRejectsHostAndUnknownRepos(t *testing.T) {
 	}
 	if err := o.Claude(ClaudeOptions{Repo: "nope"}); err == nil {
 		t.Error("unknown repo accepted")
+	}
+}
+
+func TestUpWritesTmuxConfigWithPaneDiedHook(t *testing.T) {
+	t.Setenv("TMUX", "")
+	o, _ := setup(t)
+	if err := o.Up(UpOptions{Selected: []string{"api"}, Detach: true}); err != nil {
+		t.Fatal(err)
+	}
+	conf := read(t, filepath.Join(o.Project.Root, ".neptuno/run/api.tmux.conf"))
+	if !strings.Contains(conf, "source-file -q ~/.tmux.conf") ||
+		!strings.Contains(conf, `set-hook -g pane-died "run-shell \"/bin/neptuno pane-died api '#{socket_path}' '#{pane_id}'`) {
+		t.Errorf("tmux config:\n%s", conf)
+	}
+}
+
+func TestDeadPaneCommand(t *testing.T) {
+	cmd := DeadPaneCommand("shop", "web", "130")
+	out, err := exec.Command("sh", "-c", cmd).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "\nweb exited with status 130. Run it again with: neptuno restart shop:web\n\n"; string(out) != want {
+		t.Errorf("output = %q, want %q", out, want)
+	}
+}
+
+func TestRestart(t *testing.T) {
+	o, f := setup(t)
+	if err := o.Restart("api", "web"); err == nil {
+		t.Error("restarted api although its overmind is not running")
+	}
+	f.overminds[socket("api")] = true
+	if err := o.Restart("api", "web"); err != nil {
+		t.Fatal(err)
+	}
+	if last := f.cmds[len(f.cmds)-1]; last != "overmind restart -s .neptuno/run/api.sock web" {
+		t.Errorf("ran %q", last)
 	}
 }
