@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -222,18 +223,40 @@ func isBlankOrComment(l string) bool {
 	return t == "" || strings.HasPrefix(t, "#")
 }
 
-// appendCaddySite adds an http://<name>.localhost block unless one exists.
-func appendCaddySite(src []byte, name string, port int) ([]byte, bool) {
+// caddySite adds an http://<name>.localhost block unless one exists. With
+// wildcard, the block also answers http://*.<name>.localhost, such as one
+// subdomain per tenant, and an existing block without it gains it. It
+// returns what it did: "added", "updated" or "" for nothing.
+func caddySite(src []byte, name string, port int, wildcard bool) ([]byte, string) {
 	host := "http://" + name + ".localhost"
-	if bytes.Contains(src, []byte(host+" ")) || bytes.Contains(src, []byte(host+"\n")) {
-		return src, false
+	wild := "http://*." + name + ".localhost"
+	lines := strings.Split(string(src), "\n")
+	for i, l := range lines {
+		addr, rest, ok := strings.Cut(l, "{")
+		if !ok || strings.HasPrefix(strings.TrimSpace(l), "#") {
+			continue
+		}
+		hosts := strings.FieldsFunc(addr, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' })
+		if !slices.Contains(hosts, host) {
+			continue
+		}
+		if !wildcard || slices.Contains(hosts, wild) {
+			return src, ""
+		}
+		lines[i] = strings.TrimRight(addr, " \t") + ", " + wild + " {" + rest
+		return []byte(strings.Join(lines, "\n")), "updated"
+	}
+
+	address := host
+	if wildcard {
+		address += ", " + wild
 	}
 	out := bytes.TrimRight(src, "\n")
 	if len(out) > 0 {
 		out = append(out, "\n\n"...)
 	}
-	out = append(out, fmt.Sprintf("# Added by `neptuno add %s`\n%s {\n\treverse_proxy %s:%d\n}\n", name, host, name, port)...)
-	return out, true
+	out = append(out, fmt.Sprintf("# Added by `neptuno add %s`\n%s {\n\treverse_proxy %s:%d\n}\n", name, address, name, port)...)
+	return out, "added"
 }
 
 // composeHasService reports whether compose.yml itself, not an override

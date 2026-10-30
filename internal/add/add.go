@@ -35,6 +35,9 @@ type Options struct {
 	NoGenerate bool
 	// With and Without select the stack's options on top of its defaults.
 	With, Without []string
+	// Wildcard makes the Caddy site answer *.<name>.localhost too, such as
+	// one subdomain per tenant. On an existing repo it updates the site.
+	Wildcard bool
 }
 
 // Adder adds repos to a project.
@@ -137,7 +140,7 @@ func (a *Adder) Add(opts Options) error {
 	if err := a.addComposeService(name, stack.ServicesFor(data), volumes); err != nil {
 		return err
 	}
-	if err := a.addCaddySite(name, data.Port); err != nil {
+	if err := a.addCaddySite(name, data.Port, opts.Wildcard); err != nil {
 		return err
 	}
 
@@ -158,7 +161,11 @@ func (a *Adder) Add(opts Options) error {
 		}
 	}
 
-	fmt.Fprintf(a.Log, "\nAdded %s from the %s stack. Next:\n  neptuno up %s\n  open http://%s.localhost\n", name, stack.Name, name, name)
+	if inCompose {
+		fmt.Fprintf(a.Log, "\n%s is up to date. Next:\n  neptuno up %s\n  open http://%s.localhost\n", name, name, name)
+	} else {
+		fmt.Fprintf(a.Log, "\nAdded %s from the %s stack. Next:\n  neptuno up %s\n  open http://%s.localhost\n", name, stack.Name, name, name)
+	}
 	if isNew {
 		fmt.Fprintf(a.Log, "When it has a remote, make it a submodule of this project with:\n  git submodule add <git-url> repos/%s\n", name)
 	}
@@ -244,7 +251,7 @@ func (a *Adder) addComposeService(name string, services, volumes []string) error
 	return nil
 }
 
-func (a *Adder) addCaddySite(name string, port int) error {
+func (a *Adder) addCaddySite(name string, port int, wildcard bool) error {
 	path := a.Project.Path("Caddyfile")
 	src, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -253,16 +260,38 @@ func (a *Adder) addCaddySite(name string, port int) error {
 	if err != nil {
 		return err
 	}
-	out, changed := appendCaddySite(src, name, port)
-	if !changed {
+	out, did := caddySite(src, name, port, wildcard)
+	if did == "" {
 		fmt.Fprintf(a.Log, "  kept    Caddyfile site %s.localhost\n", name)
 		return nil
 	}
 	if err := os.WriteFile(path, out, 0o644); err != nil {
 		return err
 	}
-	fmt.Fprintf(a.Log, "  added   Caddyfile site http://%s.localhost -> %s:%d\n", name, name, port)
+	switch {
+	case did == "updated":
+		fmt.Fprintf(a.Log, "  updated Caddyfile site %s.localhost to answer *.%s.localhost too\n", name, name)
+	case wildcard:
+		fmt.Fprintf(a.Log, "  added   Caddyfile site http://%s.localhost and *.%s.localhost -> %s:%d\n", name, name, name, port)
+	default:
+		fmt.Fprintf(a.Log, "  added   Caddyfile site http://%s.localhost -> %s:%d\n", name, name, port)
+	}
+	a.reloadCaddy()
 	return nil
+}
+
+// reloadCaddy applies a changed Caddyfile when the proxy is already running.
+func (a *Adder) reloadCaddy() {
+	root := a.Project.Root
+	if _, ok := a.Project.Services["proxy"]; !ok || a.Runner.LookPath("docker") != nil {
+		return
+	}
+	if id, _ := a.Runner.Output(root, "docker", "compose", "ps", "--quiet", "--status", "running", "proxy"); id == "" {
+		return
+	}
+	if !a.Runner.Check(root, "docker", "compose", "exec", "proxy", "caddy", "reload", "--config", "/etc/caddy/Caddyfile") {
+		fmt.Fprintln(a.Log, "warning: could not reload Caddy; run `docker compose restart proxy`")
+	}
 }
 
 // generate runs the stack's generate command in a one-off container of the

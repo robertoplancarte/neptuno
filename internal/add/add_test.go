@@ -212,3 +212,31 @@ func TestAddIgnoresServicesOnlyInOverride(t *testing.T) {
 		t.Error("web not added to compose.yml when an override already mentions it")
 	}
 }
+
+func TestAddWildcardOnExistingRepo(t *testing.T) {
+	a, _ := newAdder(t)
+	root := a.Project.Root
+	if err := a.Add(Options{Name: "shop", Stack: "node"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(read(t, filepath.Join(root, "Caddyfile")), "*.shop.localhost") {
+		t.Fatal("wildcard site without --wildcard")
+	}
+	// Rerunning with --wildcard keeps everything and widens the site.
+	compose := read(t, filepath.Join(root, "compose.yml"))
+	p, err := project.Load(root) // each CLI run loads the project afresh
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Project = p
+	if err := a.Add(Options{Name: "shop", Wildcard: true}); err != nil {
+		t.Fatal(err)
+	}
+	caddy := read(t, filepath.Join(root, "Caddyfile"))
+	if !strings.Contains(caddy, "http://shop.localhost, http://*.shop.localhost {\n\treverse_proxy shop:3000\n}") {
+		t.Errorf("Caddyfile:\n%s", caddy)
+	}
+	if read(t, filepath.Join(root, "compose.yml")) != compose {
+		t.Error("compose.yml changed on rerun")
+	}
+}

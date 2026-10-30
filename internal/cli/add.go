@@ -35,6 +35,7 @@ func newAddCommand() *cobra.Command {
 			"to and override the built-in ones.",
 		Example: "  neptuno add api git@github.com:acme/api.git --stack rails\n" +
 			"  neptuno add shop --stack rails --with action_text,storage_s3\n" +
+			"  neptuno add shop --wildcard     # route *.shop.localhost to shop too\n" +
 			"  neptuno add web --stack node\n" +
 			"  neptuno add worker",
 		Args: cobra.RangeArgs(1, 2),
@@ -63,12 +64,16 @@ func newAddCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&opts.NoGenerate, "no-generate", false, "skip the stack's app generator")
 	cmd.Flags().StringSliceVarP(&opts.With, "with", "w", nil, "stack options to turn on, such as --with action_text,storage_s3")
 	cmd.Flags().StringSliceVar(&opts.Without, "without", nil, "stack options to turn off, such as --without tailwind")
+	cmd.Flags().BoolVar(&opts.Wildcard, "wildcard", false, "also route *.<repo>.localhost to the repo, such as one subdomain per tenant; rerun on an existing repo to turn it on")
 	return cmd
 }
 
 // pickOptions shows a checklist of the stack's options when it has some,
 // neither --with nor --without was given, and the terminal is interactive.
 func pickOptions(cmd *cobra.Command, p *project.Project, opts *add.Options) error {
+	if entries, _ := os.ReadDir(p.Path("repos", opts.Name)); len(entries) > 0 {
+		return nil // existing repo: options only shape new apps
+	}
 	if cmd.Flags().Changed("with") || cmd.Flags().Changed("without") ||
 		!isatty.IsTerminal(os.Stdin.Fd()) || !isatty.IsTerminal(os.Stdout.Fd()) {
 		return nil

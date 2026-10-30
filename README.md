@@ -66,6 +66,23 @@ optional `generate` command, extra `volumes`, optional `extends`), a `Dockerfile
 `{{.Name}}`, `{{.Project}}` and `{{.Port}}`. Put your own in `stacks/<name>/` in
 the project to add stacks or override the built-in ones.
 
+### Subdomains per tenant
+
+```sh
+neptuno add shop --stack rails --wildcard   # new repo
+neptuno add shop --wildcard                 # turn it on for a repo you already added
+```
+
+`--wildcard` makes the repo's Caddy site `http://shop.localhost, http://*.shop.localhost`,
+so `acme.shop.localhost` and any other subdomain reach the same container with
+the `Host` header intact. On an existing repo it only widens the site, and if
+the proxy is running Caddy reloads it for you (otherwise run
+`docker compose restart proxy`). Rails needs no change: development already
+allows `.localhost` hosts, and `request.subdomain` returns `acme`. Chrome and
+Firefox resolve every `*.localhost` name to 127.0.0.1; Safari and `curl` on
+some systems don't, so add `127.0.0.1 acme.shop.localhost` to `/etc/hosts`
+for those.
+
 ### Installed packages live in volumes
 
 The `rails` stack keeps installed gems in a `<repo>_bundle` named volume at
