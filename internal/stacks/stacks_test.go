@@ -2,6 +2,7 @@ package stacks
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -208,5 +209,89 @@ func TestCopy(t *testing.T) {
 	}
 	if _, err := s.Copy(target); err == nil {
 		t.Error("Copy overwrote an existing folder")
+	}
+}
+
+func TestRailsOptions(t *testing.T) {
+	s, err := Get("", "rails")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(s.OptionNames(), ","); got != "action_text,storage_s3,tailwind" {
+		t.Errorf("options = %s", got)
+	}
+
+	// Defaults: tailwind only.
+	data, err := s.Select(Data{Name: "shop", Port: 3000}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gen, _ := s.GenerateCommand(data)
+	if !strings.HasSuffix(gen, "--skip-thruster --css=tailwind") {
+		t.Errorf("default generate = %s", gen)
+	}
+	proc, _ := s.Render("Procfile", data)
+	if !strings.Contains(string(proc), "\ncss: bin/rails tailwindcss:watch\n") {
+		t.Errorf("Procfile:\n%s", proc)
+	}
+
+	data, err = s.Select(Data{Name: "shop", Port: 3000}, []string{"action_text", "storage_s3"}, []string{"tailwind"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gen, _ = s.GenerateCommand(data)
+	if strings.Contains(gen, "tailwind") || !strings.Contains(gen, ") && (bin/rails action_text:install) && (bundle add aws-sdk-s3") {
+		t.Errorf("generate = %s", gen)
+	}
+	if out, err := exec.Command("sh", "-n", "-c", gen).CombinedOutput(); err != nil {
+		t.Errorf("generate command is not valid sh: %v\n%s", err, out)
+	}
+	env, _ := s.Render("base.env", data)
+	if !strings.Contains(string(env), "# From the storage_s3 option\nAWS_ENDPOINT=http://s3:8333\n") || !strings.Contains(string(env), "S3_BUCKET=shop-development\n") {
+		t.Errorf("base.env:\n%s", env)
+	}
+	proc, _ = s.Render("Procfile", data)
+	if strings.Contains(string(proc), "tailwind") {
+		t.Errorf("Procfile has tailwind although it is off:\n%s", proc)
+	}
+
+	if _, err := s.Select(Data{}, []string{"sidekiq"}, nil); err == nil || !strings.Contains(err.Error(), "options: action_text, storage_s3, tailwind") {
+		t.Errorf("unknown option error = %v", err)
+	}
+}
+
+func TestOptionsMergeThroughExtends(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"rails/stack.yml": "extends: rails\noptions:\n  tailwind:\n    description: Tailwind, off by default here\n  sidekiq:\n    procfile: [\"jobs: bundle exec sidekiq\"]\n    services: [valkey]\n",
+	})
+	s, err := Get(dir, "rails")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(s.OptionNames(), ","); got != "action_text,sidekiq,storage_s3,tailwind" {
+		t.Errorf("options = %s", got)
+	}
+	data, _ := s.Select(Data{Name: "shop"}, []string{"sidekiq"}, nil)
+	if data.Options["tailwind"] {
+		t.Error("the override's tailwind should not default to on")
+	}
+	if gen, _ := s.GenerateCommand(data); strings.Contains(gen, "tailwind") {
+		t.Errorf("overridden tailwind still adds its flag: %s", gen)
+	}
+	if proc, _ := s.Render("Procfile", data); !strings.Contains(string(proc), "jobs: bundle exec sidekiq\n") {
+		t.Errorf("Procfile:\n%s", proc)
+	}
+
+	copied := filepath.Join(t.TempDir(), "rails-copy")
+	if _, err := s.Copy(copied); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Get(filepath.Dir(copied), "rails-copy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(c.OptionNames(), ","); got != "action_text,sidekiq,storage_s3,tailwind" {
+		t.Errorf("copied options = %s", got)
 	}
 }

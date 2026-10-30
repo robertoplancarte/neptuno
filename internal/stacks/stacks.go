@@ -12,8 +12,14 @@
 //	app/         files copied into a brand-new repo (optional); a .tmpl
 //	             suffix is dropped, so app/go.mod.tmpl becomes go.mod
 //
-// Every file, and the generate command, is a Go text/template with .Name,
-// .Project and .Port. Built-in stacks are embedded; a project's own
+// stack.yml can also declare options, such as Tailwind for rails, that
+// `neptuno add` offers as a checklist. Each selected option adds generator
+// flags, commands run after the generator, Procfile lines, base.env lines and
+// shared services.
+//
+// Every file, the generate command and every option field is a Go
+// text/template with .Name, .Project, .Port and .Options, which maps each
+// option's name to whether it was selected. Built-in stacks are embedded; a project's own
 // stacks/<name>/ folders add to them and override them by name.
 //
 // A stack with `extends: <name>` starts from that stack: settings it leaves
@@ -63,18 +69,38 @@ type Stack struct {
 	Source string
 	// Extends names the parent stack, if any.
 	Extends string
+	// Options are the choices `neptuno add` offers, sorted by name.
+	Options []*Option
 
 	// layers holds the stack's files, its own first, then its ancestors'.
 	layers []fs.FS
 }
 
+// Option is one choice a stack offers, such as Tailwind for rails.
+type Option struct {
+	Name        string `yaml:"-"`
+	Description string `yaml:"description,omitempty"`
+	// Default options start selected.
+	Default bool `yaml:"default,omitempty"`
+	// GenerateFlags are appended to the stack's generate command.
+	GenerateFlags string `yaml:"generate_flags,omitempty"`
+	// AfterGenerate runs in the same container right after the generator.
+	AfterGenerate string `yaml:"after_generate,omitempty"`
+	// Procfile and Env are lines appended to the Procfile and base.env.
+	Procfile []string `yaml:"procfile,omitempty"`
+	Env      []string `yaml:"env,omitempty"`
+	// Services are shared compose services the repo then depends on.
+	Services []string `yaml:"services,omitempty,flow"`
+}
+
 // definition is one stack.yml as written; nil fields were left out.
 type definition struct {
-	Description *string   `yaml:"description"`
-	Port        *int      `yaml:"port"`
-	Services    *[]string `yaml:"services"`
-	Generate    *string   `yaml:"generate"`
-	Extends     string    `yaml:"extends"`
+	Description *string            `yaml:"description"`
+	Port        *int               `yaml:"port"`
+	Services    *[]string          `yaml:"services"`
+	Generate    *string            `yaml:"generate"`
+	Extends     string             `yaml:"extends"`
+	Options     map[string]*Option `yaml:"options"`
 
 	name, source string
 	fsys         fs.FS
@@ -84,6 +110,8 @@ type definition struct {
 type Data struct {
 	Name, Project string
 	Port          int
+	// Options maps every option of the stack to whether it is selected.
+	Options map[string]bool
 }
 
 // List returns every available stack, project stacks overriding built-ins.
@@ -223,6 +251,7 @@ func (r *resolver) resolve(d *definition) (*Stack, error) {
 		*s = *parent
 		s.layers = append([]fs.FS(nil), parent.layers...)
 		s.Services = append([]string(nil), parent.Services...)
+		s.Options = append([]*Option(nil), parent.Options...)
 	}
 	s.Name, s.Source, s.Extends = d.name, d.source, d.Extends
 	s.layers = append([]fs.FS{d.fsys}, s.layers...)
@@ -238,6 +267,23 @@ func (r *resolver) resolve(d *definition) (*Stack, error) {
 	if d.Generate != nil {
 		s.Generate = *d.Generate
 	}
+	// An option replaces the parent's option of the same name.
+	for name, o := range d.Options {
+		if o == nil {
+			o = &Option{}
+		}
+		o.Name = name
+		replaced := false
+		for i, po := range s.Options {
+			if po.Name == name {
+				s.Options[i], replaced = o, true
+			}
+		}
+		if !replaced {
+			s.Options = append(s.Options, o)
+		}
+	}
+	sort.Slice(s.Options, func(i, j int) bool { return s.Options[i].Name < s.Options[j].Name })
 	r.done[d] = s
 	return s, nil
 }
@@ -254,23 +300,134 @@ func (s *Stack) readFile(name string) ([]byte, error) {
 	return nil, fs.ErrNotExist
 }
 
-// Render renders one of the stack's top-level files. It returns
-// fs.ErrNotExist when neither the stack nor its parents have it.
+// Select returns the data for the stack with the default options, plus
+// with, minus without. Unknown option names are an error.
+func (s *Stack) Select(data Data, with, without []string) (Data, error) {
+	data.Options = map[string]bool{}
+	for _, o := range s.Options {
+		data.Options[o.Name] = o.Default
+	}
+	for _, list := range []struct {
+		names []string
+		on    bool
+	}{{with, true}, {without, false}} {
+		for _, name := range list.names {
+			if _, ok := data.Options[name]; !ok {
+				return data, fmt.Errorf("the %s stack has no option %q (options: %s)", s.Name, name, strings.Join(s.OptionNames(), ", "))
+			}
+			data.Options[name] = list.on
+		}
+	}
+	return data, nil
+}
+
+// OptionNames lists the stack's options.
+func (s *Stack) OptionNames() []string {
+	var names []string
+	for _, o := range s.Options {
+		names = append(names, o.Name)
+	}
+	return names
+}
+
+// selected returns the options data selects, in order.
+func (s *Stack) selected(data Data) []*Option {
+	var out []*Option
+	for _, o := range s.Options {
+		if data.Options[o.Name] {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// Render renders one of the stack's top-level files, with the Procfile and
+// env lines of the selected options appended to Procfile and base.env. It
+// returns fs.ErrNotExist when neither the stack nor its parents have it.
 func (s *Stack) Render(name string, data Data) ([]byte, error) {
+	data = withOptions(s, data)
 	b, err := s.readFile(name)
 	if err != nil {
 		return nil, err
 	}
-	return render(s.Name+"/"+name, b, data)
+	out, err := render(s.Name+"/"+name, b, data)
+	if err != nil {
+		return nil, err
+	}
+	for _, o := range s.selected(data) {
+		lines := map[string][]string{"Procfile": o.Procfile, "base.env": o.Env}[name]
+		if len(lines) == 0 {
+			continue
+		}
+		if len(out) > 0 && out[len(out)-1] != '\n' {
+			out = append(out, '\n')
+		}
+		if name == "base.env" {
+			out = append(out, fmt.Sprintf("# From the %s option\n", o.Name)...)
+		}
+		for _, l := range lines {
+			r, err := render(s.Name+"/stack.yml options."+o.Name, []byte(l), data)
+			if err != nil {
+				return nil, err
+			}
+			out = append(append(out, r...), '\n')
+		}
+	}
+	return out, nil
 }
 
-// GenerateCommand renders the stack's generate command, or "" if it has none.
+// GenerateCommand renders the stack's generate command, with the selected
+// options' generator flags and after_generate commands, or "" if the stack
+// has no generator.
 func (s *Stack) GenerateCommand(data Data) (string, error) {
 	if s.Generate == "" {
 		return "", nil
 	}
-	b, err := render(s.Name+"/stack.yml generate", []byte(s.Generate), data)
+	data = withOptions(s, data)
+	command := strings.TrimSpace(s.Generate)
+	var after []string
+	for _, o := range s.selected(data) {
+		if o.GenerateFlags != "" {
+			command += " " + strings.TrimSpace(o.GenerateFlags)
+		}
+		if o.AfterGenerate != "" {
+			after = append(after, "("+strings.TrimSpace(o.AfterGenerate)+")")
+		}
+	}
+	if len(after) > 0 {
+		command = "(" + command + ") && " + strings.Join(after, " && ")
+	}
+	b, err := render(s.Name+"/stack.yml generate", []byte(command), data)
 	return string(b), err
+}
+
+// ServicesFor returns the stack's shared services plus those of the
+// selected options.
+func (s *Stack) ServicesFor(data Data) []string {
+	data = withOptions(s, data)
+	out := append([]string(nil), s.Services...)
+	seen := map[string]bool{}
+	for _, svc := range out {
+		seen[svc] = true
+	}
+	for _, o := range s.selected(data) {
+		for _, svc := range o.Services {
+			if !seen[svc] {
+				seen[svc] = true
+				out = append(out, svc)
+			}
+		}
+	}
+	return out
+}
+
+// withOptions fills in the default selection when data has none, so
+// templates can always read .Options.<name>.
+func withOptions(s *Stack, data Data) Data {
+	if data.Options == nil {
+		data, _ = s.Select(data, nil, nil)
+	}
+	return data
 }
 
 // Files returns the stack's template files as written, merged across its
@@ -300,6 +457,7 @@ func (s *Stack) Files() (map[string][]byte, error) {
 // AppFiles renders every file under app/, merged across parents, keyed by
 // slash-separated path relative to app/.
 func (s *Stack) AppFiles(data Data) (map[string][]byte, error) {
+	data = withOptions(s, data)
 	files, err := s.Files()
 	if err != nil {
 		return nil, err
@@ -329,12 +487,17 @@ func (s *Stack) Copy(dir string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	options := map[string]*Option{}
+	for _, o := range s.Options {
+		options[o.Name] = o
+	}
 	def := struct {
-		Description string   `yaml:"description,omitempty"`
-		Port        int      `yaml:"port,omitempty"`
-		Services    []string `yaml:"services,flow"`
-		Generate    string   `yaml:"generate,omitempty"`
-	}{s.Description, s.Port, s.Services, s.Generate}
+		Description string             `yaml:"description,omitempty"`
+		Port        int                `yaml:"port,omitempty"`
+		Services    []string           `yaml:"services,flow"`
+		Generate    string             `yaml:"generate,omitempty"`
+		Options     map[string]*Option `yaml:"options,omitempty"`
+	}{s.Description, s.Port, s.Services, s.Generate, options}
 	yml, err := yaml.Marshal(def)
 	if err != nil {
 		return nil, err

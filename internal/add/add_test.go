@@ -110,6 +110,24 @@ func TestAddRunsGeneratorInContainer(t *testing.T) {
 		t.Error("--port not used for the Caddy route")
 	}
 
+	if procfile := read(t, filepath.Join(root, "procfiles/shop/Procfile")); !strings.Contains(procfile, "css: bin/rails tailwindcss:watch") {
+		t.Errorf("default tailwind option missing from the Procfile:\n%s", procfile)
+	}
+
+	f.cmds = nil
+	if err := a.Add(Options{Name: "shop3", Stack: "rails", NoGenerate: true, With: []string{"storage_s3"}, Without: []string{"tailwind"}}); err != nil {
+		t.Fatal(err)
+	}
+	if env := read(t, filepath.Join(root, "environments/shop3/base.env")); !strings.Contains(env, "S3_BUCKET=shop3-development") {
+		t.Errorf("storage_s3 env missing:\n%s", env)
+	}
+	if procfile := read(t, filepath.Join(root, "procfiles/shop3/Procfile")); strings.Contains(procfile, "tailwind") {
+		t.Errorf("tailwind is off but in the Procfile:\n%s", procfile)
+	}
+	if err := a.Add(Options{Name: "shop4", Stack: "rails", With: []string{"nope"}}); err == nil {
+		t.Error("accepted an unknown option")
+	}
+
 	f.cmds = nil
 	if err := a.Add(Options{Name: "shop2", Stack: "rails", NoGenerate: true}); err != nil {
 		t.Fatal(err)

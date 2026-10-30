@@ -5,3 +5,27 @@ generate: >-
   gem install rails -v '~> 8.0' --no-document &&
   rails new . --name={{.Name}} --database=postgresql
   --skip-git --skip-docker --skip-kamal --skip-thruster
+
+# Choices `neptuno add --stack rails` offers. Rails 8 already sets up Solid
+# Queue, Solid Cache, Solid Cable and Active Storage on local disk.
+options:
+  tailwind:
+    description: Tailwind CSS, rebuilt by a css process
+    default: true
+    generate_flags: --css=tailwind
+    procfile: ["css: bin/rails tailwindcss:watch"]
+  action_text:
+    description: Action Text rich text editing (Trix)
+    after_generate: bin/rails action_text:install
+  storage_s3:
+    description: Active Storage on the project's SeaweedFS (S3) instead of local disk
+    services: [s3]
+    env:
+      - AWS_ENDPOINT=http://s3:8333
+      - AWS_ACCESS_KEY_ID=neptuno
+      - AWS_SECRET_ACCESS_KEY=neptuno
+      - S3_BUCKET={{.Name}}-development
+    after_generate: |-
+      bundle add aws-sdk-s3 --require=false &&
+      printf '%s\n' '' 'seaweedfs:' '  service: S3' '  endpoint: <%= ENV["AWS_ENDPOINT"] %>' '  access_key_id: <%= ENV["AWS_ACCESS_KEY_ID"] %>' '  secret_access_key: <%= ENV["AWS_SECRET_ACCESS_KEY"] %>' '  region: us-east-1' '  bucket: <%= ENV["S3_BUCKET"] %>' '  force_path_style: true' >> config/storage.yml &&
+      sed -i 's/config.active_storage.service = :local/config.active_storage.service = :seaweedfs/' config/environments/development.rb

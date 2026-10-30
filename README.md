@@ -66,30 +66,57 @@ optional `generate` command, optional `extends`), a `Dockerfile`, an optional
 `{{.Name}}`, `{{.Project}}` and `{{.Port}}`. Put your own in `stacks/<name>/` in
 the project to add stacks or override the built-in ones.
 
+### Stack options
+
+Some stacks offer options, which `neptuno add` shows as a checklist (or set
+them with `--with` and `--without`). The `rails` stack has:
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `tailwind` | on | `rails new --css=tailwind` and a `css: bin/rails tailwindcss:watch` process |
+| `action_text` | off | runs `bin/rails action_text:install` |
+| `storage_s3` | off | stores Active Storage uploads in the project's SeaweedFS: adds `aws-sdk-s3`, a `seaweedfs` service in `config/storage.yml`, the S3 env vars, and creates the bucket at container start |
+
+```sh
+neptuno add shop --stack rails --with action_text,storage_s3 --without tailwind
+```
+
+Options live in `stack.yml`. Each can add generator flags, commands run right
+after the generator, Procfile lines, `base.env` lines and shared services, and
+templates can test `{{if .Options.tailwind}}`. A project stack that `extends:`
+another can add options or replace one by name:
+
+```yaml
+# stacks/rails/stack.yml
+extends: rails
+options:
+  sidekiq:
+    description: Sidekiq on Valkey
+    after_generate: bundle add sidekiq
+    procfile: ["jobs: bundle exec sidekiq"]
+    env: ["REDIS_URL=redis://valkey:6379/0"]
+    services: [valkey]
+```
+
 ### Customizing a stack
 
 A stack with `extends:` inherits every setting and file it doesn't define, so
-an override only holds what changes. For example, Rails with Tailwind:
+an override only holds what changes. For example, Rails without Minitest, for
+teams on RSpec:
 
 ```yaml
 # stacks/rails/stack.yml  (extends the built-in rails it overrides)
 extends: rails
-description: Rails 8 with Tailwind
 generate: >-
   gem install rails -v '~> 8.0' --no-document &&
-  rails new . --name={{.Name}} --database=postgresql --css=tailwind
-  --skip-git --skip-docker --skip-kamal --skip-thruster
+  rails new . --name={{.Name}} --database=postgresql
+  --skip-git --skip-docker --skip-kamal --skip-thruster --skip-test
 ```
 
-```
-# stacks/rails/Procfile
-web: bin/rails server -b 0.0.0.0 -p {{.Port}}
-css: bin/rails tailwindcss:watch
-```
-
-The Dockerfile, entrypoint.sh and base.env still come from the built-in stack. To start from a
-full copy instead, run `neptuno stacks copy rails` (or `neptuno stacks copy
-rails rails-tailwind` for a new stack next to the original).
+Its options, Dockerfile, entrypoint.sh, Procfile and base.env still come from
+the built-in stack. To start from a full copy instead, run `neptuno stacks copy
+rails` (or `neptuno stacks copy rails rails-rspec` for a new stack next to the
+original).
 
 ## Starting services
 
