@@ -61,10 +61,21 @@ app, and `rails` runs `rails new` inside the new container, so you don't need
 Ruby installed. Existing files are never overwritten, so `add` can be rerun.
 
 Stacks are folders with a `stack.yml` (description, port, shared services,
-optional `generate` command, optional `extends`), a `Dockerfile`, an optional
+optional `generate` command, extra `volumes`, optional `extends`), a `Dockerfile`, an optional
 `entrypoint.sh`, a `Procfile`, a `base.env` and an optional `app/` of starter files, all Go templates with
 `{{.Name}}`, `{{.Project}}` and `{{.Port}}`. Put your own in `stacks/<name>/` in
 the project to add stacks or override the built-in ones.
+
+### Installed packages live in volumes
+
+The `rails` stack keeps installed gems in a `<repo>_bundle` named volume at
+`/usr/local/bundle`, and the `node` stack keeps `node_modules` in a
+`<repo>_node_modules` volume; `neptuno add` mounts them and declares them in
+`compose.yml`. They survive rebuilt and recreated containers, so the Rails
+entrypoint's `bundle check || bundle install` only installs when
+`Gemfile.lock` changes. Named volumes live inside Docker's VM, so they run at
+native speed on a Mac. `docker compose down -v` removes them for a clean
+install.
 
 ### Stack options
 

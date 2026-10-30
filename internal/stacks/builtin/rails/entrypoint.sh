@@ -5,13 +5,24 @@
 # on every container start. Setup output: docker compose logs {{.Name}}
 setup() {
   [ -f Gemfile ] || return 0 # no app yet while `neptuno add` runs rails new
-  bundle install && bin/rails db:prepare && rm -f tmp/pids/server.pid || return 1
-  # The storage_s3 option keeps uploads in this bucket on SeaweedFS; creating
-  # one that exists is harmless.
-  if [ -n "$S3_BUCKET" ] && [ -n "$AWS_ENDPOINT" ]; then
-    curl -fsS -o /dev/null -X PUT "$AWS_ENDPOINT/$S3_BUCKET" || echo "entrypoint.sh: could not create bucket $S3_BUCKET" >&2
-  fi
+  # Gems live in the {{.Name}}_bundle volume, so this only installs what
+  # Gemfile.lock added since the last start.
+  { bundle check >/dev/null || bundle install; } &&
+    bin/rails db:prepare && rm -f tmp/pids/server.pid || return 1
 }
+# The storage_s3 option keeps uploads in this bucket on SeaweedFS. It is
+# created in the background, as SeaweedFS can take a while to start; creating
+# one that exists is harmless.
+if [ -n "$S3_BUCKET" ] && [ -n "$AWS_ENDPOINT" ]; then
+  (
+    for _ in $(seq 1 120); do
+      curl -fsS -o /dev/null -X PUT "$AWS_ENDPOINT/$S3_BUCKET" 2>/dev/null && exit 0
+      sleep 2
+    done
+    echo "entrypoint.sh: could not create bucket $S3_BUCKET at $AWS_ENDPOINT" >&2
+  ) &
+fi
+
 if setup; then
   touch /dev/shm/neptuno-ready
 else

@@ -97,3 +97,26 @@ func TestAppendCaddySite(t *testing.T) {
 		t.Error("site added twice")
 	}
 }
+
+func TestDeclareVolumes(t *testing.T) {
+	src := "services:\n  db:\n    image: postgres\n\nvolumes:\n  postgres:\n\n# trailing comment\n"
+	got, err := declareVolumes([]byte(src), []string{"postgres", "shop_bundle"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "services:\n  db:\n    image: postgres\n\nvolumes:\n  postgres:\n  shop_bundle:\n\n# trailing comment\n"; string(got) != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+
+	got, err = declareVolumes([]byte("services:\n  db:\n    image: postgres\n"), []string{"shop_bundle"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(string(got), "\nvolumes:\n  shop_bundle:\n") {
+		t.Errorf("no volumes block created:\n%s", got)
+	}
+
+	if names := namedVolumes([]string{"shop_bundle:/usr/local/bundle", "./repos/shop:/app", "/tmp:/tmp", "~/x:/x"}); strings.Join(names, ",") != "shop_bundle" {
+		t.Errorf("namedVolumes = %v", names)
+	}
+}

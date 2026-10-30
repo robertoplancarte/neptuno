@@ -130,7 +130,11 @@ func (a *Adder) Add(opts Options) error {
 	}
 
 	// 3. compose.yml and the Caddyfile.
-	if err := a.addComposeService(name, stack.ServicesFor(data)); err != nil {
+	volumes, err := stack.VolumesFor(data)
+	if err != nil {
+		return err
+	}
+	if err := a.addComposeService(name, stack.ServicesFor(data), volumes); err != nil {
 		return err
 	}
 	if err := a.addCaddySite(name, data.Port); err != nil {
@@ -207,7 +211,7 @@ func (a *Adder) writeIfMissing(rel string, content []byte) error {
 	return nil
 }
 
-func (a *Adder) addComposeService(name string, services []string) error {
+func (a *Adder) addComposeService(name string, services, volumes []string) error {
 	p := a.Project
 	if ok, err := composeHasService(p.Path("compose.yml"), name); err != nil || ok {
 		if ok {
@@ -226,8 +230,11 @@ func (a *Adder) addComposeService(name string, services []string) error {
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	out, err := insertService(src, serviceSpec{Name: name, DependsOn: deps})
+	out, err := insertService(src, serviceSpec{Name: name, DependsOn: deps, Volumes: volumes})
 	if err != nil {
+		return err
+	}
+	if out, err = declareVolumes(out, namedVolumes(volumes)); err != nil {
 		return err
 	}
 	if err := os.WriteFile(path, out, 0o644); err != nil {

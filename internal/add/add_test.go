@@ -110,6 +110,10 @@ func TestAddRunsGeneratorInContainer(t *testing.T) {
 		t.Error("--port not used for the Caddy route")
 	}
 
+	compose := read(t, filepath.Join(root, "compose.yml"))
+	if !strings.Contains(compose, `"./.neptuno/claude:/root/.claude", "shop_bundle:/usr/local/bundle"]`) || !strings.Contains(compose, "\n  shop_bundle:\n") {
+		t.Errorf("gem volume not mounted and declared:\n%s", compose)
+	}
 	if procfile := read(t, filepath.Join(root, "procfiles/shop/Procfile")); !strings.Contains(procfile, "css: bin/rails tailwindcss:watch") {
 		t.Errorf("default tailwind option missing from the Procfile:\n%s", procfile)
 	}

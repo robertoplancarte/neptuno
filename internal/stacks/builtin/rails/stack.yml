@@ -1,6 +1,9 @@
 description: Ruby 3.3 and a new Rails 8 app on PostgreSQL, generated with rails new
 port: 3000
 services: [postgres, valkey, s3]
+# Installed gems live in a named volume, so they survive container rebuilds
+# and only change when Gemfile.lock does.
+volumes: ["{{.Name}}_bundle:/usr/local/bundle"]
 generate: >-
   gem install rails -v '~> 8.0' --no-document &&
   rails new . --name={{.Name}} --database=postgresql

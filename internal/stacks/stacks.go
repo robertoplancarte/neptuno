@@ -2,8 +2,8 @@
 // from. A stack is a folder:
 //
 //	stack.yml    description, port, the shared services it uses, an
-//	             optional generator command run in the new container, and
-//	             an optional stack it extends
+//	             optional generator command run in the new container,
+//	             extra compose volumes, and an optional stack it extends
 //	Dockerfile   the development image
 //	entrypoint.sh  setup run at container start, such as bundle install
 //	             (optional); Procfile processes wait for it
@@ -65,6 +65,10 @@ type Stack struct {
 	// Generate runs in the repo's container, in its empty folder, to create
 	// a new app (such as `rails new .`). Runs after app/ is copied.
 	Generate string
+	// Volumes are extra compose volumes for the repo's service, such as
+	// "{{.Name}}_bundle:/usr/local/bundle" to keep installed gems across
+	// container rebuilds. Named volumes are declared in compose.yml too.
+	Volumes []string
 	// Source says where the stack came from: BuiltIn or its folder.
 	Source string
 	// Extends names the parent stack, if any.
@@ -99,6 +103,7 @@ type definition struct {
 	Port        *int               `yaml:"port"`
 	Services    *[]string          `yaml:"services"`
 	Generate    *string            `yaml:"generate"`
+	Volumes     *[]string          `yaml:"volumes"`
 	Extends     string             `yaml:"extends"`
 	Options     map[string]*Option `yaml:"options"`
 
@@ -251,6 +256,7 @@ func (r *resolver) resolve(d *definition) (*Stack, error) {
 		*s = *parent
 		s.layers = append([]fs.FS(nil), parent.layers...)
 		s.Services = append([]string(nil), parent.Services...)
+		s.Volumes = append([]string(nil), parent.Volumes...)
 		s.Options = append([]*Option(nil), parent.Options...)
 	}
 	s.Name, s.Source, s.Extends = d.name, d.source, d.Extends
@@ -266,6 +272,9 @@ func (r *resolver) resolve(d *definition) (*Stack, error) {
 	}
 	if d.Generate != nil {
 		s.Generate = *d.Generate
+	}
+	if d.Volumes != nil {
+		s.Volumes = *d.Volumes
 	}
 	// An option replaces the parent's option of the same name.
 	for name, o := range d.Options {
@@ -421,6 +430,20 @@ func (s *Stack) ServicesFor(data Data) []string {
 	return out
 }
 
+// VolumesFor renders the stack's volumes.
+func (s *Stack) VolumesFor(data Data) ([]string, error) {
+	data = withOptions(s, data)
+	var out []string
+	for _, v := range s.Volumes {
+		b, err := render(s.Name+"/stack.yml volumes", []byte(v), data)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, string(b))
+	}
+	return out, nil
+}
+
 // withOptions fills in the default selection when data has none, so
 // templates can always read .Options.<name>.
 func withOptions(s *Stack, data Data) Data {
@@ -496,8 +519,9 @@ func (s *Stack) Copy(dir string) ([]string, error) {
 		Port        int                `yaml:"port,omitempty"`
 		Services    []string           `yaml:"services,flow"`
 		Generate    string             `yaml:"generate,omitempty"`
+		Volumes     []string           `yaml:"volumes,omitempty"`
 		Options     map[string]*Option `yaml:"options,omitempty"`
-	}{s.Description, s.Port, s.Services, s.Generate, options}
+	}{s.Description, s.Port, s.Services, s.Generate, s.Volumes, options}
 	yml, err := yaml.Marshal(def)
 	if err != nil {
 		return nil, err
