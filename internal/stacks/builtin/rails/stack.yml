@@ -1,0 +1,7 @@
+description: Ruby 3.3 and a new Rails 8 app on PostgreSQL, generated with rails new
+port: 3000
+services: [postgres, valkey, s3]
+generate: >-
+  gem install rails -v '~> 8.0' --no-document &&
+  rails new . --name={{.Name}} --database=postgresql
+  --skip-git --skip-docker --skip-kamal --skip-thruster
