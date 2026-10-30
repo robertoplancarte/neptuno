@@ -142,6 +142,7 @@ func loadOrchestrator(cmd *cobra.Command) (*orchestrate.Orchestrator, error) {
 	if err != nil {
 		return nil, err
 	}
+	orchestrate.UseOuterTmux()
 	return &orchestrate.Orchestrator{
 		Project: p,
 		Runner:  orchestrate.ExecRunner{Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr()},
@@ -176,7 +177,8 @@ func newRestartCommand() *cobra.Command {
 }
 
 // newPaneDiedCommand backs the pane-died hook in overmind's tmux config: it
-// replaces the dead pane of a process that exited with a shell on the host.
+// replaces the dead pane of a process that exited with a shell on the host,
+// and closes the pane once that shell exits.
 func newPaneDiedCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:    "pane-died <repo> <tmux-socket> <pane> <process> <status>",
@@ -184,8 +186,15 @@ func newPaneDiedCommand() *cobra.Command {
 		Args:   cobra.ExactArgs(5),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repo, socket, pane, process, status := args[0], args[1], args[2], args[3], args[4]
-			return exec.Command("tmux", "-S", socket, "respawn-pane", "-k", "-t", pane,
-				orchestrate.DeadPaneCommand(repo, process, status)).Run()
+			tmux := func(args ...string) *exec.Cmd {
+				return exec.Command("tmux", append([]string{"-S", socket}, args...)...)
+			}
+			// The shell that replaced the process exited: close its pane.
+			// overmind's restart respawns the pane with the process again.
+			if out, _ := tmux("display-message", "-p", "-t", pane, "#{pane_start_command}").Output(); orchestrate.IsDeadPaneCommand(string(out)) {
+				return tmux("kill-pane", "-t", pane).Run()
+			}
+			return tmux("respawn-pane", "-k", "-t", pane, orchestrate.DeadPaneCommand(repo, process, status)).Run()
 		},
 	}
 }

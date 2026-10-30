@@ -174,7 +174,8 @@ closing the repo's window leaves its processes running, and the next
 `neptuno up` reconnects to them. When a process exits or you stop it with
 Ctrl-C, its window turns into a shell on the host, in the project folder,
 with a note on how to run it again: `neptuno restart <repo>:<process>`
-(`neptuno restart <repo>` restarts all of a repo's processes). Your own
+(`neptuno restart <repo>` restarts all of a repo's processes). `exit` or
+Ctrl-D in that shell closes the window, and `neptuno restart` reopens it. Your own
 `~/.tmux.conf` still applies inside overmind's session.
 
 ### Setup at container start
@@ -202,7 +203,9 @@ cd repos/api && neptuno claude     # the repo defaults to the folder you're in
 ```
 
 It starts the container if needed and runs outside overmind, so quitting
-Claude never stops the app. Sign-in and settings live in `.neptuno/claude`,
+Claude never stops the app. The window always opens in Neptuno's session, next
+to the repos' windows, even when you run it from a shell inside overmind's
+session. Sign-in and settings live in `.neptuno/claude`,
 mounted at `/root/.claude` in every repo `neptuno add` creates, so you sign in
 once per project and it survives rebuilds. For services added before this, add
 `"./.neptuno/claude:/root/.claude"` to their `volumes` (or set
