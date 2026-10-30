@@ -1,0 +1,37 @@
+# compose.yml for {{.Name}}, scaffolded by `neptuno init`.
+#
+# This file is yours: edit, add or remove services freely. Neptuno only
+# appends a service here when you run `neptuno add <repo> <git-url>`.
+name: {{.Name}}
+
+services:
+  proxy:
+    image: caddy:2
+    ports: ["80:80"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy:/data
+
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: postgres
+    ports: ["5432:5432"]
+    volumes: ["postgres:/var/lib/postgresql/data"]
+
+  valkey:
+    image: valkey/valkey:8
+    ports: ["6379:6379"]
+    volumes: ["valkey:/data"]
+
+  s3:
+    image: chrislusf/seaweedfs
+    command: server -s3 -dir=/data
+    ports: ["8333:8333"]
+    volumes: ["s3:/data"]
+
+volumes:
+  caddy:
+  postgres:
+  valkey:
+  s3:
