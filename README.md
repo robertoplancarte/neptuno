@@ -116,8 +116,11 @@ tmux window. A repo's window shows those per-process windows; overmind's tmux
 is nested inside Neptuno's, so press the prefix twice to reach it (`Ctrl-b
 Ctrl-b n` for the next process, `Ctrl-b Ctrl-b d` to detach). Detaching or
 closing the repo's window leaves its processes running, and the next
-`neptuno up` reconnects to them. Restart a dead process with
-`overmind restart -s .neptuno/run/<repo>.sock <process>`.
+`neptuno up` reconnects to them. When a process exits or you stop it with
+Ctrl-C, its window turns into a shell on the host, in the project folder,
+with a note on how to run it again: `neptuno restart <repo>:<process>`
+(`neptuno restart <repo>` restarts all of a repo's processes). Your own
+`~/.tmux.conf` still applies inside overmind's session.
 
 ### Setup at container start
 

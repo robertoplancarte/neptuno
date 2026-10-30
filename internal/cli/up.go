@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 
 	"github.com/mattn/go-isatty"
 	"github.com/robertoplancarte/neptuno/internal/env"
@@ -146,4 +148,44 @@ func loadOrchestrator(cmd *cobra.Command) (*orchestrate.Orchestrator, error) {
 		Log:     cmd.ErrOrStderr(),
 		Neptuno: self,
 	}, nil
+}
+
+func newRestartCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "restart [repo[:process]]",
+		Short: "Restart a repo's processes, or one of them",
+		Long: "Restarts the repo's processes through its running overmind, or only the\n" +
+			"named one, as in `neptuno restart api:web`. With no arguments inside a\n" +
+			"repo's folder, restarts that repo.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			o, err := loadOrchestrator(cmd)
+			if err != nil {
+				return err
+			}
+			var target string
+			if len(args) == 1 {
+				target = args[0]
+			} else if target = serviceFromFolder(cmd, o.Project); target == "" {
+				return errors.New("name a repo, such as `neptuno restart api` or `neptuno restart api:web`")
+			}
+			repo, process, _ := strings.Cut(target, ":")
+			return o.Restart(repo, process)
+		},
+	}
+}
+
+// newPaneDiedCommand backs the pane-died hook in overmind's tmux config: it
+// replaces the dead pane of a process that exited with a shell on the host.
+func newPaneDiedCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:    "pane-died <repo> <tmux-socket> <pane> <process> <status>",
+		Hidden: true,
+		Args:   cobra.ExactArgs(5),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			repo, socket, pane, process, status := args[0], args[1], args[2], args[3], args[4]
+			return exec.Command("tmux", "-S", socket, "respawn-pane", "-k", "-t", pane,
+				orchestrate.DeadPaneCommand(repo, process, status)).Run()
+		},
+	}
 }

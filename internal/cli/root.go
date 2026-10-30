@@ -31,7 +31,9 @@ func NewRootCommand() *cobra.Command {
 		newDownCommand(),
 		newClaudeCommand(),
 		newEnvCommand(),
+		newRestartCommand(),
 		newHostExecCommand(),
+		newPaneDiedCommand(),
 	)
 	return root
 }
