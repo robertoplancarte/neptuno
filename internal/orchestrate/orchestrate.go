@@ -324,15 +324,28 @@ func (o *Orchestrator) startOvermind(repo string) error {
 
 // connectCommand is the shell command the repo's window runs: it attaches to
 // overmind's tmux session, which has a window per process, and offers to
-// reconnect after a detach until overmind stops.
+// reconnect after a detach until overmind stops. overmind answers on its
+// socket before its tmux session exists, so a failed connect is retried
+// quietly for a few seconds before its error is shown.
 func (o *Orchestrator) connectCommand(repo string) string {
 	sock := procfile.Quote(socket(repo))
 	status := "overmind status -s " + sock + " >/dev/null 2>&1"
 	// overmind's session is a separate tmux server, nested in this one.
-	return fmt.Sprintf("while %[1]s; do env -u TMUX overmind connect -s %[2]s; %[1]s || break; "+
-		`echo; echo "Detached from %[3]s's processes. Press enter to reconnect."; read _; done; `+
-		`echo; echo "overmind for %[3]s has stopped. Press enter to close this window."; read _`,
-		status, sock, repo)
+	connect := "env -u TMUX overmind connect -s " + sock
+	return strings.Join([]string{
+		"tries=0",
+		"while " + status,
+		"do if " + connect + " 2>/dev/null",
+		"then tries=0; " + status + " || break",
+		`echo; echo "Detached from ` + repo + `'s processes. Press enter to reconnect."; read _`,
+		"elif [ $tries -lt 20 ]",
+		"then tries=$((tries+1)); sleep 0.5",
+		"else " + connect,
+		`echo; echo "Could not connect to ` + repo + `'s processes. Press enter to retry."; read _; tries=0`,
+		"fi",
+		"done",
+		`echo; echo "overmind for ` + repo + ` has stopped. Press enter to close this window."; read _`,
+	}, "; ")
 }
 
 // containerIDs maps container-mode repos to their running container, if any.
