@@ -51,13 +51,31 @@ func ParseFile(path string) ([]Entry, error) {
 	return entries, nil
 }
 
+// ReadyMarker and FailedMarker are what a container's entrypoint.sh writes
+// when its setup, such as bundle install, succeeds or fails. They live on
+// /dev/shm, a tmpfs docker mounts fresh each time a container starts, so a
+// marker never survives into the next start.
+const (
+	ReadyMarker  = "/dev/shm/neptuno-ready"
+	FailedMarker = "/dev/shm/neptuno-failed"
+)
+
 // WrapContainer runs each command inside the compose service with
 // `docker compose exec`. overmind gives each line a TTY, so exec allocates
-// one too and debuggers and REPLs work.
-func WrapContainer(entries []Entry, service string) []Entry {
+// one too and debuggers and REPLs work. With waitForEntrypoint, each command
+// first waits for the entrypoint to write a marker, and stops if it failed.
+func WrapContainer(entries []Entry, service string, waitForEntrypoint bool) []Entry {
+	wait := ""
+	if waitForEntrypoint {
+		done := fmt.Sprintf("[ -e %s ] || [ -e %s ]", ReadyMarker, FailedMarker)
+		wait = fmt.Sprintf("if ! { %[1]s; }; then echo \"Waiting for the %[3]s entrypoint.sh to finish (docker compose logs -f %[3]s)\"; "+
+			"until %[1]s; do sleep 1; done; fi; "+
+			"if [ -e %[2]s ]; then echo \"The %[3]s entrypoint.sh failed; see docker compose logs %[3]s\" >&2; exit 1; fi; ",
+			done, FailedMarker, service)
+	}
 	out := make([]Entry, len(entries))
 	for i, e := range entries {
-		out[i] = Entry{e.Name, fmt.Sprintf("exec docker compose exec %s sh -c %s", Quote(service), Quote(e.Command))}
+		out[i] = Entry{e.Name, fmt.Sprintf("exec docker compose exec %s sh -c %s", Quote(service), Quote(wait+e.Command))}
 	}
 	return out
 }

@@ -1,10 +1,12 @@
 package procfile
 
 import (
+	"os"
 	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParse(t *testing.T) {
@@ -22,10 +24,44 @@ func TestParse(t *testing.T) {
 }
 
 func TestWrapContainer(t *testing.T) {
-	got := WrapContainer([]Entry{{"web", "echo 'hi' && rails s"}}, "api")
+	got := WrapContainer([]Entry{{"web", "echo 'hi' && rails s"}}, "api", false)
 	want := `exec docker compose exec api sh -c 'echo '\''hi'\'' && rails s'`
 	if got[0].Command != want {
 		t.Errorf("WrapContainer = %s\nwant %s", got[0].Command, want)
+	}
+}
+
+// TestWrapContainerWaitsForEntrypoint runs the wrapped command's script with
+// sh, with a scratch folder standing in for the container's /dev/shm.
+func TestWrapContainerWaitsForEntrypoint(t *testing.T) {
+	dir := t.TempDir()
+	cmd := WrapContainer([]Entry{{"web", "echo started"}}, "api", true)[0].Command
+	inner, err := exec.Command("sh", "-c", "printf %s "+strings.TrimPrefix(cmd, "exec docker compose exec api sh -c ")).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := strings.ReplaceAll(string(inner), "/dev/shm/", dir+"/")
+
+	go func() {
+		time.Sleep(1500 * time.Millisecond)
+		os.WriteFile(dir+"/neptuno-ready", nil, 0o644)
+	}()
+	out, err := exec.Command("sh", "-c", script).CombinedOutput()
+	if err != nil || !strings.HasPrefix(string(out), "Waiting for the api entrypoint.sh") || !strings.HasSuffix(string(out), "started\n") {
+		t.Errorf("waiting for setup: %q, %v", out, err)
+	}
+
+	if out, err := exec.Command("sh", "-c", script).CombinedOutput(); err != nil || string(out) != "started\n" {
+		t.Errorf("setup done: %q, %v", out, err)
+	}
+
+	os.Remove(dir + "/neptuno-ready")
+	if err := os.WriteFile(dir+"/neptuno-failed", nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err = exec.Command("sh", "-c", script).CombinedOutput()
+	if err == nil || strings.Contains(string(out), "started") || !strings.Contains(string(out), "api entrypoint.sh failed") {
+		t.Errorf("setup failed: %q, %v", out, err)
 	}
 }
 

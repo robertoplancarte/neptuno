@@ -103,6 +103,9 @@ func TestAddRunsGeneratorInContainer(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, ".neptuno/env/shop.env")); err != nil {
 		t.Error("env file not written before the generator ran")
 	}
+	if !strings.Contains(read(t, filepath.Join(root, "dockerfiles/shop/entrypoint.sh")), "bin/rails db:prepare") {
+		t.Error("the rails entrypoint.sh was not written")
+	}
 	if !strings.Contains(read(t, filepath.Join(root, "Caddyfile")), "reverse_proxy shop:4000") {
 		t.Error("--port not used for the Caddy route")
 	}
