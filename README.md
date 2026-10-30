@@ -6,7 +6,7 @@ compose for containers, overmind for processes and tmux for terminals. It aims
 to be opinionated enough to get you going fast, and customizable enough to run
 just the way you work.
 
-> Status: early. `init`, `up`, `down` and `env use/show` work; `add`, `sync`, `doctor` and the dashboard are on the way.
+> Status: early. `init`, `add`, `up`, `down` and `env use/show` work; `sync`, `doctor` and the dashboard are on the way.
 
 ## Install
 
@@ -42,6 +42,29 @@ acme/
 | PostgreSQL | `postgres:17` | `localhost:5432` |
 | Valkey | `valkey/valkey:8` | `localhost:6379` |
 | Object storage | `chrislusf/seaweedfs` | `localhost:8333`, `s3.localhost` |
+
+## Adding repos
+
+```sh
+neptuno add api git@github.com:acme/api.git --stack rails   # clone an existing repo
+neptuno add shop --stack rails                               # start a brand-new app
+neptuno add worker                                           # blank repo, bring your own toolchain
+neptuno stacks                                               # list stacks
+```
+
+`neptuno add` writes `dockerfiles/<repo>/Dockerfile`, `procfiles/<repo>/Procfile`
+and `environments/<repo>/{base,local}.env`, appends a service to `compose.yml`
+and an `http://<repo>.localhost` site to the `Caddyfile`. With a git URL the
+repo is cloned into `repos/<repo>` as a submodule. Without one, a new git repo
+is created from the stack: `node`, `go` and `python` copy in a small runnable
+app, and `rails` runs `rails new` inside the new container, so you don't need
+Ruby installed. Existing files are never overwritten, so `add` can be rerun.
+
+Stacks are folders with a `stack.yml` (description, port, shared services,
+optional `generate` command), a `Dockerfile`, a `Procfile`, a `base.env` and an
+optional `app/` of starter files, all Go templates with `{{.Name}}`,
+`{{.Project}}` and `{{.Port}}`. Put your own in `stacks/<name>/` in the project
+to add stacks or override the built-in ones.
 
 ## Starting services
 

@@ -30,15 +30,15 @@ var files = []struct{ path, template string }{
 	{"environments/_shared/local.env", "shared_local.env.tmpl"},
 }
 
-// namePattern matches valid docker compose project names, which the project
-// name doubles as.
+// namePattern matches valid docker compose project names, which project
+// names double as. Repo names follow the same rule so they work as compose
+// service names and <repo>.localhost hosts.
 var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
-// ErrInvalidName is returned when a project name is not a valid compose
-// project name.
-var ErrInvalidName = errors.New("project name must start with a lowercase letter or digit and contain only lowercase letters, digits, dashes and underscores")
+// ErrInvalidName is returned for an invalid project or repo name.
+var ErrInvalidName = errors.New("name must start with a lowercase letter or digit and contain only lowercase letters, digits, dashes and underscores")
 
-// ValidateName reports whether name can be used as a project name.
+// ValidateName reports whether name can be used as a project or repo name.
 func ValidateName(name string) error {
 	if !namePattern.MatchString(name) {
 		return fmt.Errorf("%q: %w", name, ErrInvalidName)
