@@ -27,8 +27,9 @@ func newUpCommand() *cobra.Command {
 			"dockerfiles/api), starts that repo. Elsewhere with no arguments, shows a\n" +
 			"menu of the repos and services in compose.yml.\n" +
 			"Containers start with docker compose; each repo's Procfile runs under\n" +
-			"overmind in its own window of the project's tmux session, which Neptuno\n" +
-			"then attaches to.",
+			"overmind with --any-can-die, so one process exiting leaves the others\n" +
+			"running. Each repo gets a window in the project's tmux session showing\n" +
+			"one overmind window per process, and Neptuno then attaches to it.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o, err := loadOrchestrator(cmd)
 			if err != nil {

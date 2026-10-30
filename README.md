@@ -105,7 +105,16 @@ Containers start with `docker compose up --detach`. Each repo with a
 `procfiles/<repo>/Procfile` gets an overmind window in the `neptuno-<project>`
 tmux session, with every Procfile line wrapped in `docker compose exec <repo>`,
 and Neptuno attaches you to that session. `neptuno down [service...]` stops
-them again. Run with no arguments inside a repo's folder under `environments/`,
+them again.
+
+Overmind runs in the background with `--any-can-die`, so a process that
+crashes or exits leaves the rest running, and it gives every process its own
+tmux window. A repo's window shows those per-process windows; overmind's tmux
+is nested inside Neptuno's, so press the prefix twice to reach it (`Ctrl-b
+Ctrl-b n` for the next process, `Ctrl-b Ctrl-b d` to detach). Detaching or
+closing the repo's window leaves its processes running, and the next
+`neptuno up` reconnects to them. Restart a dead process with
+`overmind restart -s .neptuno/run/<repo>.sock <process>`. Run with no arguments inside a repo's folder under `environments/`,
 `dockerfiles/`, `procfiles/` or `repos/`, `up`, `down` and `env show` act on
 that repo. You need docker, tmux and
 [overmind](https://github.com/DarthSim/overmind) installed.

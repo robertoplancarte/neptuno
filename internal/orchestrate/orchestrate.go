@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/robertoplancarte/neptuno/internal/env"
 	"github.com/robertoplancarte/neptuno/internal/procfile"
@@ -256,38 +257,82 @@ func (o *Orchestrator) hasWindow(repo string) bool {
 	return o.hasSession() && o.Runner.Check(o.Project.Root, "tmux", "list-panes", "-t", o.target(repo))
 }
 
-// openWindow starts the repo's overmind in its own window of the outer
-// session, unless that window is already open.
+// openWindow makes sure the repo's overmind is running and has a window in
+// the outer session. Overmind runs as a daemon with --any-can-die, so one
+// process exiting leaves the others running, and it keeps each process in
+// its own tmux window. The repo's window connects to those windows, and
+// closing it leaves the processes running.
 func (o *Orchestrator) openWindow(repo string, restart bool) error {
 	p := o.Project
-	if o.hasWindow(repo) {
-		if !restart && o.Runner.Check(p.Root, "overmind", "status", "-s", socket(repo)) {
-			fmt.Fprintf(o.Log, "%s is already running in tmux window %s:%s\n", repo, o.SessionName(), repo)
-			return nil
+	sock := socket(repo)
+	running := o.Runner.Check(p.Root, "overmind", "status", "-s", sock)
+	switch {
+	case running && !restart && o.hasWindow(repo):
+		fmt.Fprintf(o.Log, "%s is already running in tmux window %s:%s\n", repo, o.SessionName(), repo)
+		return nil
+	case running && !restart:
+		fmt.Fprintf(o.Log, "Reconnecting to %s's running processes\n", repo)
+	default:
+		// Replace an overmind whose container was recreated, and a window
+		// that outlived its overmind.
+		if running {
+			_ = o.Runner.Check(p.Root, "overmind", "quit", "-s", sock)
 		}
-		// The window outlived its overmind or its container, so replace it.
-		_ = o.Runner.Check(p.Root, "overmind", "quit", "-s", socket(repo))
-		if err := o.Runner.Run(p.Root, "tmux", "kill-window", "-t", o.target(repo)); err != nil {
+		if o.hasWindow(repo) {
+			if err := o.Runner.Run(p.Root, "tmux", "kill-window", "-t", o.target(repo)); err != nil {
+				return err
+			}
+		}
+		if err := o.startOvermind(repo); err != nil {
 			return err
 		}
 	}
+	if o.hasWindow(repo) {
+		return nil
+	}
+	command := o.connectCommand(repo)
+	if !o.hasSession() {
+		return o.Runner.Run(p.Root, "tmux", "new-session", "-d", "-s", o.SessionName(), "-n", repo, "-c", p.Root, command)
+	}
+	return o.Runner.Run(p.Root, "tmux", "new-window", "-d", "-t", "="+o.SessionName()+":", "-n", repo, "-c", p.Root, command)
+}
+
+// startOvermind starts the repo's overmind as a daemon and waits for its
+// socket to answer.
+func (o *Orchestrator) startOvermind(repo string) error {
+	p := o.Project
 	sock := socket(repo)
 	if err := os.MkdirAll(p.Path(filepath.Dir(sock)), 0o755); err != nil {
 		return err
 	}
 	_ = os.Remove(p.Path(sock)) // stale from a crashed overmind
 
-	q := procfile.Quote
-	command := fmt.Sprintf(
-		"overmind start -f %s -d %s -s %s -w %s; "+
-			`echo; echo "overmind exited with status $?. Press enter to close this window."; read _`,
-		q(o.generatedProcfile(repo)), q(p.Root), q(sock), q(p.Name+"-"+repo))
-
 	fmt.Fprintf(o.Log, "Starting overmind for %s\n", repo)
-	if !o.hasSession() {
-		return o.Runner.Run(p.Root, "tmux", "new-session", "-d", "-s", o.SessionName(), "-n", repo, "-c", p.Root, command)
+	if _, err := o.Runner.Output(p.Root, "overmind", "start", "--daemonize", "--any-can-die",
+		"-f", o.generatedProcfile(repo), "-d", p.Root, "-s", sock, "-w", p.Name+"-"+repo); err != nil {
+		return fmt.Errorf("starting overmind for %s: %w", repo, err)
 	}
-	return o.Runner.Run(p.Root, "tmux", "new-window", "-d", "-t", "="+o.SessionName()+":", "-n", repo, "-c", p.Root, command)
+	// overmind start returns before the daemon listens on its socket.
+	for i := 0; i < 50; i++ {
+		if o.Runner.Check(p.Root, "overmind", "status", "-s", sock) {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("overmind for %s did not start; see `overmind echo -s %s` in %s", repo, sock, p.Root)
+}
+
+// connectCommand is the shell command the repo's window runs: it attaches to
+// overmind's tmux session, which has a window per process, and offers to
+// reconnect after a detach until overmind stops.
+func (o *Orchestrator) connectCommand(repo string) string {
+	sock := procfile.Quote(socket(repo))
+	status := "overmind status -s " + sock + " >/dev/null 2>&1"
+	// overmind's session is a separate tmux server, nested in this one.
+	return fmt.Sprintf("while %[1]s; do env -u TMUX overmind connect -s %[2]s; %[1]s || break; "+
+		`echo; echo "Detached from %[3]s's processes. Press enter to reconnect."; read _; done; `+
+		`echo; echo "overmind for %[3]s has stopped. Press enter to close this window."; read _`,
+		status, sock, repo)
 }
 
 // containerIDs maps container-mode repos to their running container, if any.
