@@ -23,7 +23,9 @@ func newUpCommand() *cobra.Command {
 		Use:   "up [service...]",
 		Short: "Pick services and start them with their dependencies",
 		Long: "Starts the chosen repos and services plus everything they depend on.\n\n" +
-			"With no arguments, shows a menu of the repos and services in compose.yml.\n" +
+			"With no arguments inside a repo's folder (such as repos/api or\n" +
+			"dockerfiles/api), starts that repo. Elsewhere with no arguments, shows a\n" +
+			"menu of the repos and services in compose.yml.\n" +
 			"Containers start with docker compose; each repo's Procfile runs under\n" +
 			"overmind in its own window of the project's tmux session, which Neptuno\n" +
 			"then attaches to.",
@@ -37,7 +39,7 @@ func newUpCommand() *cobra.Command {
 				return err
 			}
 
-			selected, err := chooseServices(o.Project, args, all)
+			selected, err := chooseServices(cmd, o.Project, args, all)
 			if errors.Is(err, tui.ErrCancelled) {
 				return nil
 			}
@@ -53,13 +55,20 @@ func newUpCommand() *cobra.Command {
 	return cmd
 }
 
-func chooseServices(p *project.Project, args []string, all bool) ([]string, error) {
+// chooseServices picks what `up` starts: the named services, everything
+// with --all, the repo whose folder the user is in, or else the menu.
+func chooseServices(cmd *cobra.Command, p *project.Project, args []string, all bool) ([]string, error) {
 	repos, services := p.Selectable()
 	switch {
 	case len(args) > 0:
 		return args, nil
 	case all:
 		return append(repos, services...), nil
+	}
+	if name := serviceFromFolder(cmd, p); name != "" {
+		return []string{name}, nil
+	}
+	switch {
 	case len(repos)+len(services) == 0:
 		return nil, errors.New("compose.yml has no services to start")
 	case !isatty.IsTerminal(os.Stdin.Fd()) && !isatty.IsCygwinTerminal(os.Stdin.Fd()):
@@ -79,19 +88,42 @@ func chooseServices(p *project.Project, args []string, all bool) ([]string, erro
 }
 
 func newDownCommand() *cobra.Command {
-	return &cobra.Command{
+	var all bool
+	cmd := &cobra.Command{
 		Use:   "down [service...]",
 		Short: "Stop overmind and the containers",
-		Long: "Stops the named repos' overmind and containers. With no arguments, stops\n" +
-			"everything, closes the tmux session and runs docker compose down.",
+		Long: "Stops the named repos' overmind and containers. With no arguments inside a\n" +
+			"repo's folder (such as repos/api or dockerfiles/api), stops that repo.\n" +
+			"Otherwise stops everything, closes the tmux session and runs docker compose down.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o, err := loadOrchestrator(cmd)
 			if err != nil {
 				return err
 			}
+			if len(args) == 0 && !all {
+				if name := serviceFromFolder(cmd, o.Project); name != "" {
+					args = []string{name}
+				}
+			}
 			return o.Down(args)
 		},
 	}
+	cmd.Flags().BoolVar(&all, "all", false, "stop everything, even inside a repo's folder")
+	return cmd
+}
+
+// serviceFromFolder returns the repo whose folder the working directory is
+// in, and says so, so `neptuno up` in dockerfiles/api means `neptuno up api`.
+func serviceFromFolder(cmd *cobra.Command, p *project.Project) string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	name := p.ServiceAt(wd)
+	if name != "" {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Using %s (from the current folder; pass names or --all to choose others)\n", name)
+	}
+	return name
 }
 
 func loadOrchestrator(cmd *cobra.Command) (*orchestrate.Orchestrator, error) {

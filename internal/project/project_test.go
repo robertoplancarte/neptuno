@@ -142,3 +142,36 @@ func TestFindOutsideProject(t *testing.T) {
 		t.Errorf("Find = %v, want ErrNotFound", err)
 	}
 }
+
+func TestServiceAt(t *testing.T) {
+	root := newProject(t, map[string]string{
+		"compose.yml":                   compose,
+		"repos/api/src/.keep":           "",
+		"dockerfiles/api/.keep":         "",
+		"environments/_shared/base.env": "",
+		"environments/web/base.env":     "",
+		"procfiles/worker/Procfile":     "",
+	})
+	p, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := map[string]string{
+		"":                     "",
+		"repos":                "",
+		"repos/api":            "api",
+		"repos/api/src":        "api",
+		"dockerfiles/api":      "api",
+		"environments/web":     "web",
+		"environments/_shared": "",
+		"procfiles/worker":     "worker",
+	}
+	for dir, want := range tests {
+		if got := p.ServiceAt(filepath.Join(root, dir)); got != want {
+			t.Errorf("ServiceAt(%q) = %q, want %q", dir, got, want)
+		}
+	}
+	if got := p.ServiceAt(t.TempDir()); got != "" {
+		t.Errorf("ServiceAt outside the project = %q", got)
+	}
+}

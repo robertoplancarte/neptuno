@@ -49,6 +49,7 @@ acme/
 neptuno up            # pick repos and services from a menu
 neptuno up api web    # skip the menu
 neptuno up --all -d   # everything, without attaching
+cd dockerfiles/api && neptuno up   # same as `neptuno up api`
 ```
 
 `neptuno up` starts the chosen services plus everything they `depends_on`.
@@ -56,7 +57,9 @@ Containers start with `docker compose up --detach`. Each repo with a
 `procfiles/<repo>/Procfile` gets an overmind window in the `neptuno-<project>`
 tmux session, with every Procfile line wrapped in `docker compose exec <repo>`,
 and Neptuno attaches you to that session. `neptuno down [service...]` stops
-them again. You need docker, tmux and
+them again. Run with no arguments inside a repo's folder under `environments/`,
+`dockerfiles/`, `procfiles/` or `repos/`, `up`, `down` and `env show` act on
+that repo. You need docker, tmux and
 [overmind](https://github.com/DarthSim/overmind) installed.
 
 ## Environments

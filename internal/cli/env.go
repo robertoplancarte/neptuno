@@ -93,15 +93,21 @@ func newEnvShowCommand() *cobra.Command {
 		set    []string
 	)
 	cmd := &cobra.Command{
-		Use:   "show <repo>",
+		Use:   "show [repo]",
 		Short: "Print a repo's merged variables and where each came from",
-		Args:  cobra.ExactArgs(1),
+		Long:  "Prints a repo's merged variables. The repo defaults to the one whose folder you are in.",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := loadProject()
 			if err != nil {
 				return err
 			}
-			repo := args[0]
+			var repo string
+			if len(args) == 1 {
+				repo = args[0]
+			} else if repo = serviceFromFolder(cmd, p); repo == "" {
+				return fmt.Errorf("name a repo, or run this inside one of its folders")
+			}
 			if !p.IsRepo(repo) {
 				return fmt.Errorf("unknown repo %q", repo)
 			}

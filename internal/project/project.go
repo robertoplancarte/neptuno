@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -294,4 +295,38 @@ func exists(path string) bool {
 func isDir(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+// ServiceAt returns the repo whose folder encloses dir, such as "api" for
+// anywhere under dockerfiles/api, environments/api, procfiles/api or
+// repos/api. It returns "" outside those folders and for environments/_shared.
+func (p *Project) ServiceAt(dir string) string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	}
+	root := p.Root
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return ""
+	}
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	if len(parts) < 2 {
+		return ""
+	}
+	switch parts[0] {
+	case "environments", "dockerfiles", "procfiles", "repos":
+	default:
+		return ""
+	}
+	if name := parts[1]; name != "_shared" && name != ".." {
+		return name
+	}
+	return ""
 }
