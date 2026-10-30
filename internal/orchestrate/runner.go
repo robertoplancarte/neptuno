@@ -3,6 +3,7 @@
 package orchestrate
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -53,6 +54,10 @@ func (r ExecRunner) Output(dir, name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && len(exit.Stderr) > 0 {
+		err = fmt.Errorf("%w: %s", err, strings.TrimSpace(string(exit.Stderr)))
+	}
 	return strings.TrimSpace(string(out)), err
 }
 
