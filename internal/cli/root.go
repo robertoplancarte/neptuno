@@ -29,6 +29,7 @@ func NewRootCommand() *cobra.Command {
 		newStacksCommand(),
 		newUpCommand(),
 		newDownCommand(),
+		newClaudeCommand(),
 		newEnvCommand(),
 		newHostExecCommand(),
 	)

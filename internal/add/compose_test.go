@@ -36,7 +36,7 @@ services:
   api:
     build: dockerfiles/api
     working_dir: /app
-    volumes: ["./repos/api:/app"]
+    volumes: ["./repos/api:/app", "./.neptuno/claude:/root/.claude"]
     env_file: .neptuno/env/api.env
     command: sleep infinity    # overmind execs the real processes
     depends_on: [postgres, s3]

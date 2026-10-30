@@ -17,6 +17,10 @@ var (
 	servicesLine = regexp.MustCompile(`^services:\s*(#.*)?$`)
 )
 
+// ClaudeVolume keeps Claude Code's sign-in and settings in the project's
+// git-ignored .neptuno folder, shared by every repo's container.
+const ClaudeVolume = "./.neptuno/claude:/root/.claude"
+
 // serviceSpec is the compose service `neptuno add` appends for a repo.
 type serviceSpec struct {
 	Name      string
@@ -31,7 +35,7 @@ func (s serviceSpec) lines(indent string) []string {
 		in + s.Name + ":",
 		in2 + "build: dockerfiles/" + s.Name,
 		in2 + "working_dir: /app",
-		fmt.Sprintf(`%svolumes: ["./repos/%s:/app"]`, in2, s.Name),
+		fmt.Sprintf(`%svolumes: ["./repos/%s:/app", "%s"]`, in2, s.Name, ClaudeVolume),
 		in2 + "env_file: .neptuno/env/" + s.Name + ".env",
 		in2 + "command: sleep infinity    # overmind execs the real processes",
 	}
