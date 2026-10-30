@@ -250,3 +250,77 @@ func read(t *testing.T, path string) string {
 	}
 	return string(b)
 }
+
+func TestClaudeInRunningContainer(t *testing.T) {
+	t.Setenv("TMUX", "")
+	o, f := setup(t)
+	f.containers["api"] = []string{"abc123"}
+	var log strings.Builder
+	o.Log = &log
+
+	if err := o.Claude(ClaudeOptions{Repo: "api", Args: []string{"--continue"}}); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, c := range f.cmds {
+		got = append(got, strings.ReplaceAll(c, o.Project.Root, "ROOT"))
+	}
+	want := []string{
+		"tmux new-session -d -s neptuno-acme -n claude-api -c ROOT docker compose exec api claude --continue; " +
+			`status=$?; if [ $status -ne 0 ]; then echo; echo "claude exited with status $status. Press enter to close this window."; read _; fi`,
+		"tmux select-window -t =neptuno-acme:claude-api",
+		"attach: tmux attach-session -t =neptuno-acme",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("commands:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if !strings.Contains(log.String(), "does not mount /root/.claude") {
+		t.Errorf("no warning about the missing config mount:\n%s", log.String())
+	}
+	if _, err := os.Stat(filepath.Join(o.Project.Root, ".neptuno/claude")); err != nil {
+		t.Error(".neptuno/claude not created")
+	}
+}
+
+func TestClaudeStartsStoppedContainerAndReusesWindow(t *testing.T) {
+	t.Setenv("TMUX", "")
+	o, f := setup(t)
+	compose := read(t, filepath.Join(o.Project.Root, "compose.yml"))
+	compose = strings.Replace(compose, "    env_file: .neptuno/env/api.env\n",
+		"    env_file: .neptuno/env/api.env\n    volumes: [\"./repos/api:/app\", \"./.neptuno/claude:/root/.claude\"]\n", 1)
+	if err := os.WriteFile(filepath.Join(o.Project.Root, "compose.yml"), []byte(compose), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var log strings.Builder
+	o.Log = &log
+
+	if err := o.Claude(ClaudeOptions{Repo: "api", Detach: true}); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.cmds) != 3 || !strings.HasPrefix(f.cmds[0], "docker compose up --detach postgres api") ||
+		!strings.Contains(f.cmds[1], "-n api ") || !strings.Contains(f.cmds[2], "-n claude-api ") {
+		t.Errorf("commands:\n%s", strings.Join(f.cmds, "\n"))
+	}
+	if strings.Contains(log.String(), "does not mount") {
+		t.Errorf("warned although the mount exists:\n%s", log.String())
+	}
+
+	f.cmds = nil
+	f.containers["api"] = []string{"abc123"}
+	if err := o.Claude(ClaudeOptions{Repo: "api", Detach: true}); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.cmds) != 0 {
+		t.Errorf("second call ran %q, want nothing", f.cmds)
+	}
+}
+
+func TestClaudeRejectsHostAndUnknownRepos(t *testing.T) {
+	o, _ := setup(t)
+	if err := o.Claude(ClaudeOptions{Repo: "docs"}); err == nil || !strings.Contains(err.Error(), "runs on the host") {
+		t.Errorf("host repo: %v", err)
+	}
+	if err := o.Claude(ClaudeOptions{Repo: "nope"}); err == nil {
+		t.Error("unknown repo accepted")
+	}
+}

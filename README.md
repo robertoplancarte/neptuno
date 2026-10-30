@@ -6,7 +6,7 @@ compose for containers, overmind for processes and tmux for terminals. It aims
 to be opinionated enough to get you going fast, and customizable enough to run
 just the way you work.
 
-> Status: early. `init`, `add`, `up`, `down` and `env use/show` work; `sync`, `doctor` and the dashboard are on the way.
+> Status: early. `init`, `add`, `up`, `down`, `claude` and `env use/show` work; `sync`, `doctor` and the dashboard are on the way.
 
 ## Install
 
@@ -109,6 +109,27 @@ them again. Run with no arguments inside a repo's folder under `environments/`,
 `dockerfiles/`, `procfiles/` or `repos/`, `up`, `down` and `env show` act on
 that repo. You need docker, tmux and
 [overmind](https://github.com/DarthSim/overmind) installed.
+
+## Claude Code in your containers
+
+Every built-in stack installs [Claude Code](https://claude.com/claude-code) in
+its dev image. Run it inside a repo's container, next to the code, tools and
+services the app really uses:
+
+```sh
+neptuno claude api                 # opens a claude-api window in the tmux session
+neptuno claude api -- --continue   # arguments after -- go to claude
+cd repos/api && neptuno claude     # the repo defaults to the folder you're in
+```
+
+It starts the container if needed and runs outside overmind, so quitting
+Claude never stops the app. Sign-in and settings live in `.neptuno/claude`,
+mounted at `/root/.claude` in every repo `neptuno add` creates, so you sign in
+once per project and it survives rebuilds. For services added before this, add
+`"./.neptuno/claude:/root/.claude"` to their `volumes` (or set
+`CLAUDE_CODE_OAUTH_TOKEN` in `environments/_shared/*.local.env`), and rebuild
+the image with `docker compose build <repo>` after adding Claude Code to its
+Dockerfile.
 
 ## Environments
 
