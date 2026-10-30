@@ -85,15 +85,52 @@ func TestInsertServiceRefusesInvalidResult(t *testing.T) {
 
 func TestAppendCaddySite(t *testing.T) {
 	src := []byte("http://s3.localhost {\n\treverse_proxy s3:8333\n}\n")
-	got, changed := appendCaddySite(src, "api", 3000)
-	if !changed {
+	got, did := caddySite(src, "api", 3000, false)
+	if did != "added" {
 		t.Fatal("site not added")
 	}
 	want := "http://s3.localhost {\n\treverse_proxy s3:8333\n}\n\n# Added by `neptuno add api`\nhttp://api.localhost {\n\treverse_proxy api:3000\n}\n"
 	if string(got) != want {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
-	if _, changed := appendCaddySite(got, "api", 3000); changed {
+	if _, did := caddySite(got, "api", 3000, false); did != "" {
 		t.Error("site added twice")
+	}
+
+	// --wildcard on an existing repo widens its site.
+	got, did = caddySite(got, "api", 3000, true)
+	if did != "updated" || !strings.Contains(string(got), "\nhttp://api.localhost, http://*.api.localhost {\n\treverse_proxy api:3000\n}\n") {
+		t.Errorf("%s:\n%s", did, got)
+	}
+	if _, did := caddySite(got, "api", 3000, true); did != "" {
+		t.Error("wildcard added twice")
+	}
+
+	got, did = caddySite(src, "shop", 3000, true)
+	if did != "added" || !strings.Contains(string(got), "\nhttp://shop.localhost, http://*.shop.localhost {\n") {
+		t.Errorf("%s:\n%s", did, got)
+	}
+}
+
+func TestDeclareVolumes(t *testing.T) {
+	src := "services:\n  db:\n    image: postgres\n\nvolumes:\n  postgres:\n\n# trailing comment\n"
+	got, err := declareVolumes([]byte(src), []string{"postgres", "shop_bundle"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "services:\n  db:\n    image: postgres\n\nvolumes:\n  postgres:\n  shop_bundle:\n\n# trailing comment\n"; string(got) != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+
+	got, err = declareVolumes([]byte("services:\n  db:\n    image: postgres\n"), []string{"shop_bundle"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(string(got), "\nvolumes:\n  shop_bundle:\n") {
+		t.Errorf("no volumes block created:\n%s", got)
+	}
+
+	if names := namedVolumes([]string{"shop_bundle:/usr/local/bundle", "./repos/shop:/app", "/tmp:/tmp", "~/x:/x"}); strings.Join(names, ",") != "shop_bundle" {
+		t.Errorf("namedVolumes = %v", names)
 	}
 }

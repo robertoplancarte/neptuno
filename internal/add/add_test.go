@@ -110,6 +110,10 @@ func TestAddRunsGeneratorInContainer(t *testing.T) {
 		t.Error("--port not used for the Caddy route")
 	}
 
+	compose := read(t, filepath.Join(root, "compose.yml"))
+	if !strings.Contains(compose, `"./.neptuno/claude:/root/.claude", "shop_bundle:/usr/local/bundle"]`) || !strings.Contains(compose, "\n  shop_bundle:\n") {
+		t.Errorf("gem volume not mounted and declared:\n%s", compose)
+	}
 	if procfile := read(t, filepath.Join(root, "procfiles/shop/Procfile")); !strings.Contains(procfile, "css: bin/rails tailwindcss:watch") {
 		t.Errorf("default tailwind option missing from the Procfile:\n%s", procfile)
 	}
@@ -206,5 +210,33 @@ func TestAddIgnoresServicesOnlyInOverride(t *testing.T) {
 	}
 	if !strings.Contains(read(t, filepath.Join(root, "compose.yml")), "\n  web:\n") {
 		t.Error("web not added to compose.yml when an override already mentions it")
+	}
+}
+
+func TestAddWildcardOnExistingRepo(t *testing.T) {
+	a, _ := newAdder(t)
+	root := a.Project.Root
+	if err := a.Add(Options{Name: "shop", Stack: "node"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(read(t, filepath.Join(root, "Caddyfile")), "*.shop.localhost") {
+		t.Fatal("wildcard site without --wildcard")
+	}
+	// Rerunning with --wildcard keeps everything and widens the site.
+	compose := read(t, filepath.Join(root, "compose.yml"))
+	p, err := project.Load(root) // each CLI run loads the project afresh
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Project = p
+	if err := a.Add(Options{Name: "shop", Wildcard: true}); err != nil {
+		t.Fatal(err)
+	}
+	caddy := read(t, filepath.Join(root, "Caddyfile"))
+	if !strings.Contains(caddy, "http://shop.localhost, http://*.shop.localhost {\n\treverse_proxy shop:3000\n}") {
+		t.Errorf("Caddyfile:\n%s", caddy)
+	}
+	if read(t, filepath.Join(root, "compose.yml")) != compose {
+		t.Error("compose.yml changed on rerun")
 	}
 }

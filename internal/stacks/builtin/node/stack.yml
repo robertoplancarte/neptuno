@@ -1,3 +1,6 @@
 description: Node.js 22 HTTP server with node --watch reloads
 port: 3000
 services: [postgres, valkey, s3]
+# node_modules lives in a named volume: installed packages survive container
+# rebuilds, and Linux builds of native modules stay out of the host's folder.
+volumes: ["{{.Name}}_node_modules:/app/node_modules"]
