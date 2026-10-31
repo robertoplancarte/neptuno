@@ -6,7 +6,7 @@ compose for containers, overmind for processes and tmux for terminals. It aims
 to be opinionated enough to get you going fast, and customizable enough to run
 just the way you work.
 
-> Status: early. `init`, `add`, `up`, `down`, `claude` and `env use/show` work; `sync`, `doctor` and the dashboard are on the way.
+> Status: early. `init`, `add`, `up`, `down`, `claude`, `env use/show` and the dashboard work; `sync` and `doctor` are on the way.
 
 ## Install
 
@@ -200,6 +200,32 @@ new app over a database an earlier app of the same name left, the first start
 renames the old one to `<name>_development_old_<time>` instead of failing on
 tables that already exist.
 Rebuild the image (`docker compose build <repo>`) after changing it.
+
+## Dashboard
+
+Run `neptuno` with no arguments inside a project to open the dashboard. It
+lists every repo with its state, how many of its overmind processes are
+running, its branch, the commit it is at (`*` when the work tree has
+uncommitted changes) and that commit's date, and every other compose service
+with its container state and published ports. The row under the cursor shows
+more: the commit's subject and author, each process and its state, the
+container's health and what it depends on. It refreshes every two seconds.
+
+| Key | Does |
+| --- | --- |
+| `↑` `↓` / `j` `k` | move |
+| `space` | select rows; `a` selects all |
+| `enter` | open the repo's window |
+| `u` | start the selected rows, or the one under the cursor (`neptuno up -d`) |
+| `s` | stop them (`neptuno down`) |
+| `r` | restart a repo's processes |
+| `c` | open Claude Code in a repo's container |
+| `q` | quit |
+
+`neptuno up` makes the dashboard the first window of the `neptuno-<project>`
+session, named `neptuno`, so attaching lands on it. Quitting it closes that
+window, and the next `neptuno up` brings it back. `neptuno status` prints
+the same table once, for scripts and terminals without a TUI.
 
 ## Claude Code in your containers
 

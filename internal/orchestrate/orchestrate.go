@@ -125,6 +125,11 @@ func (o *Orchestrator) Up(opts UpOptions) error {
 	}
 	after := o.containerIDs(windows)
 
+	if len(windows) > 0 {
+		if err := o.ensureDashboard(); err != nil {
+			return err
+		}
+	}
 	for _, repo := range windows {
 		// A recreated container (new env or image) takes the old exec'd
 		// processes with it, so overmind has to start over.
@@ -292,11 +297,31 @@ func (o *Orchestrator) openWindow(repo string, restart bool) error {
 	if o.hasWindow(repo) {
 		return nil
 	}
-	command := o.connectCommand(repo)
-	if !o.hasSession() {
-		return o.Runner.Run(p.Root, "tmux", "new-session", "-d", "-s", o.SessionName(), "-n", repo, "-c", p.Root, command)
+	return o.newWindow(repo, o.connectCommand(repo))
+}
+
+// newWindow adds a window to the project's session, creating the session
+// first with the dashboard as its first window.
+func (o *Orchestrator) newWindow(name, command string) error {
+	if err := o.ensureDashboard(); err != nil {
+		return err
 	}
-	return o.Runner.Run(p.Root, "tmux", "new-window", "-d", "-t", "="+o.SessionName()+":", "-n", repo, "-c", p.Root, command)
+	return o.Runner.Run(o.Project.Root, "tmux", "new-window", "-d", "-t", "="+o.SessionName()+":", "-n", name, "-c", o.Project.Root, command)
+}
+
+// ensureDashboard makes sure the project's session exists and its first
+// window, named neptuno, runs the dashboard. A dashboard closed with q comes
+// back before the first window, next to the others.
+func (o *Orchestrator) ensureDashboard() error {
+	p := o.Project
+	command := procfile.Quote(o.Neptuno)
+	if !o.hasSession() {
+		return o.Runner.Run(p.Root, "tmux", "new-session", "-d", "-s", o.SessionName(), "-n", DashboardWindow, "-c", p.Root, command)
+	}
+	if o.hasWindow(DashboardWindow) {
+		return nil
+	}
+	return o.Runner.Run(p.Root, "tmux", "new-window", "-d", "-b", "-t", "="+o.SessionName()+":^", "-n", DashboardWindow, "-c", p.Root, command)
 }
 
 // startOvermind starts the repo's overmind as a daemon and waits for its
