@@ -166,8 +166,9 @@ func TestUp(t *testing.T) {
 	}
 	want := []string{
 		"docker compose up --detach postgres api valkey web",
+		"tmux new-session -d -s neptuno-acme -n neptuno -c ROOT /bin/neptuno",
 		"overmind start --daemonize --any-can-die -f ROOT/.neptuno/procfiles/api/Procfile -d ROOT -s .neptuno/run/api.sock -w acme-api -F .neptuno/run/api.tmux.conf",
-		"tmux new-session -d -s neptuno-acme -n api -c ROOT " + o.connectCommand("api"),
+		"tmux new-window -d -t =neptuno-acme: -n api -c ROOT " + o.connectCommand("api"),
 		"overmind start --daemonize --any-can-die -f ROOT/.neptuno/procfiles/docs/Procfile -d ROOT -s .neptuno/run/docs.sock -w acme-docs -F .neptuno/run/docs.tmux.conf",
 		"tmux new-window -d -t =neptuno-acme: -n docs -c ROOT " + o.connectCommand("docs"),
 		"attach: tmux attach-session -t =neptuno-acme",
@@ -229,6 +230,7 @@ func TestUpSkipsRunningWindowsAndSwitchesInsideTmux(t *testing.T) {
 	}
 	want := []string{
 		"docker compose up --detach postgres api",
+		"tmux new-window -d -b -t =neptuno-acme:^ -n neptuno -c " + o.Project.Root + " /bin/neptuno",
 		"tmux switch-client -t =neptuno-acme",
 	}
 	if !reflect.DeepEqual(f.cmds, want) {
@@ -249,7 +251,7 @@ func TestUpRestartsOvermindWhenContainerIsRecreated(t *testing.T) {
 	for _, c := range f.cmds {
 		got = append(got, strings.Fields(c)[0]+" "+strings.Fields(c)[1])
 	}
-	want := []string{"docker compose", "overmind quit", "tmux kill-window", "overmind start", "tmux new-window"}
+	want := []string{"docker compose", "tmux new-window", "overmind quit", "tmux kill-window", "overmind start", "tmux new-window"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("commands:\n%s\nwant prefixes %v", strings.Join(f.cmds, "\n"), want)
 	}
@@ -270,8 +272,9 @@ func TestUpReconnectsToRunningOvermind(t *testing.T) {
 	if err := o.Up(UpOptions{Selected: []string{"api"}, Detach: true}); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.cmds) != 2 || !strings.HasPrefix(f.cmds[1], "tmux new-session -d -s neptuno-acme -n api ") ||
-		!strings.Contains(f.cmds[1], "overmind connect") {
+	if len(f.cmds) != 3 || !strings.HasPrefix(f.cmds[1], "tmux new-session -d -s neptuno-acme -n neptuno ") ||
+		!strings.HasPrefix(f.cmds[2], "tmux new-window -d -t =neptuno-acme: -n api ") ||
+		!strings.Contains(f.cmds[2], "overmind connect") {
 		t.Errorf("commands:\n%s\nwant compose up and a window that connects, without restarting overmind", strings.Join(f.cmds, "\n"))
 	}
 }
@@ -334,7 +337,8 @@ func TestClaudeInRunningContainer(t *testing.T) {
 		got = append(got, strings.ReplaceAll(c, o.Project.Root, "ROOT"))
 	}
 	want := []string{
-		"tmux new-session -d -s neptuno-acme -n claude-api -c ROOT docker compose exec api claude --continue; " +
+		"tmux new-session -d -s neptuno-acme -n neptuno -c ROOT /bin/neptuno",
+		"tmux new-window -d -t =neptuno-acme: -n claude-api -c ROOT docker compose exec api claude --continue; " +
 			`status=$?; if [ $status -ne 0 ]; then echo; echo "claude exited with status $status. Press enter to close this window."; read _; fi`,
 		"tmux select-window -t =neptuno-acme:claude-api",
 		"attach: tmux attach-session -t =neptuno-acme",
@@ -365,9 +369,10 @@ func TestClaudeStartsStoppedContainerAndReusesWindow(t *testing.T) {
 	if err := o.Claude(ClaudeOptions{Repo: "api", Detach: true}); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.cmds) != 4 || !strings.HasPrefix(f.cmds[0], "docker compose up --detach postgres api") ||
-		!strings.HasPrefix(f.cmds[1], "overmind start ") ||
-		!strings.Contains(f.cmds[2], "-n api ") || !strings.Contains(f.cmds[3], "-n claude-api ") {
+	if len(f.cmds) != 5 || !strings.HasPrefix(f.cmds[0], "docker compose up --detach postgres api") ||
+		!strings.Contains(f.cmds[1], "new-session -d -s neptuno-acme -n neptuno ") ||
+		!strings.HasPrefix(f.cmds[2], "overmind start ") ||
+		!strings.Contains(f.cmds[3], "-n api ") || !strings.Contains(f.cmds[4], "-n claude-api ") {
 		t.Errorf("commands:\n%s", strings.Join(f.cmds, "\n"))
 	}
 	if strings.Contains(log.String(), "does not mount") {

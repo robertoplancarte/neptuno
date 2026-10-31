@@ -82,13 +82,7 @@ func (o *Orchestrator) Claude(opts ClaudeOptions) error {
 			`; status=$?; if [ $status -ne 0 ]; then echo; echo "claude exited with status $status. Press enter to close this window."; read _; fi`
 
 		fmt.Fprintf(o.Log, "Starting Claude Code in the %s container\n", repo)
-		var err error
-		if o.hasSession() {
-			err = o.Runner.Run(p.Root, "tmux", "new-window", "-d", "-t", "="+o.SessionName()+":", "-n", window, "-c", p.Root, command)
-		} else {
-			err = o.Runner.Run(p.Root, "tmux", "new-session", "-d", "-s", o.SessionName(), "-n", window, "-c", p.Root, command)
-		}
-		if err != nil {
+		if err := o.newWindow(window, command); err != nil {
 			return err
 		}
 	}

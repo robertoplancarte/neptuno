@@ -2,7 +2,6 @@
 package cli
 
 import (
-	"github.com/robertoplancarte/neptuno/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -15,12 +14,14 @@ func NewRootCommand() *cobra.Command {
 		Use:   "neptuno",
 		Short: "Environment as code for multi-repo development",
 		Long: "Neptuno runs a multi-repo development environment by driving docker compose,\n" +
-			"overmind and tmux. Run it with no arguments to open the TUI.",
+			"overmind and tmux. Run it with no arguments inside a project to open the\n" +
+			"dashboard, which shows every repo and service, its state and its git\n" +
+			"commit, and starts, stops, restarts and opens them.",
 		Version:      Version,
 		SilenceUsage: true,
 		Args:         cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return tui.Run()
+			return runDashboard(cmd)
 		},
 	}
 	root.AddCommand(
@@ -29,6 +30,7 @@ func NewRootCommand() *cobra.Command {
 		newStacksCommand(),
 		newUpCommand(),
 		newDownCommand(),
+		newStatusCommand(),
 		newClaudeCommand(),
 		newEnvCommand(),
 		newRestartCommand(),
