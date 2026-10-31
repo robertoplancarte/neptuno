@@ -114,3 +114,21 @@ func TestParseAssignments(t *testing.T) {
 		t.Error("accepted assignment without =")
 	}
 }
+
+func TestConfigs(t *testing.T) {
+	dir := t.TempDir()
+	for _, f := range []string{"_shared/base.env", "_shared/local.env", "_shared/staging.env",
+		"api/base.env", "api/production.env", "api/me.local.env", "web/qa.env"} {
+		path := filepath.Join(dir, f)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := Resolver{Dir: dir}.Configs("api", "local", "review")
+	if want := []string{"local", "review", "production", "staging"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Configs = %v, want %v", got, want)
+	}
+}

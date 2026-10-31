@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robertoplancarte/neptuno/internal/env"
 	"github.com/robertoplancarte/neptuno/internal/project"
 	"github.com/robertoplancarte/neptuno/internal/state"
 )
@@ -40,6 +41,9 @@ type ServiceStatus struct {
 	Claude bool
 	// Env is the repo's active configuration, such as local.
 	Env string
+	// Envs are the configurations the repo can switch to, the default
+	// first.
+	Envs []string
 	// DependsOn lists the direct dependencies.
 	DependsOn []string
 	// Git describes the repo's checkout, or is nil when it has none.
@@ -127,6 +131,7 @@ func (o *Orchestrator) Status() []ServiceStatus {
 				s.DependsOn = p.Config.Repos[name].DependsOn
 			}
 			s.Env = st.EnvFor(name, p.Config.DefaultEnv)
+			s.Envs = env.Resolver{Dir: p.Path("environments")}.Configs(name, p.Config.DefaultEnv, s.Env)
 			s.Window, s.Claude = windows[name], windows[ClaudeWindow(name)]
 			if procs, err := o.Runner.Output(p.Root, "overmind", "status", "-s", socket(name)); err == nil {
 				s.Overmind, s.Processes = true, parseOvermindStatus(procs)

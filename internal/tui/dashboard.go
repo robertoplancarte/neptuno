@@ -47,6 +47,14 @@ type dashboard struct {
 	width    int
 	message  string
 	now      func() time.Time
+	// envs is the open env chooser, or nil.
+	envs *envChooser
+}
+
+// envChooser picks the configuration a repo runs with.
+type envChooser struct {
+	row    orchestrate.ServiceStatus
+	cursor int
 }
 
 var (
@@ -149,8 +157,24 @@ func (m *dashboard) targets() []string {
 
 func (m *dashboard) key(key string) (tea.Model, tea.Cmd) {
 	m.message = ""
+	if m.envs != nil {
+		return m, m.envKey(key)
+	}
 	row, ok := m.current()
 	switch key {
+	case "e":
+		switch {
+		case !ok:
+		case !row.Repo:
+			m.message = row.Name + " is a container from compose.yml; envs belong to repos"
+		default:
+			m.envs = &envChooser{row: row}
+			for i, name := range row.Envs {
+				if name == row.Env {
+					m.envs.cursor = i
+				}
+			}
+		}
 	case "q", "esc", "ctrl+c":
 		return m, tea.Quit
 	case "up", "k":
@@ -217,14 +241,70 @@ func (m *dashboard) key(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// envKey handles a key while the env chooser is open.
+func (m *dashboard) envKey(key string) tea.Cmd {
+	c := m.envs
+	switch key {
+	case "ctrl+c":
+		return tea.Quit
+	case "esc", "q", "e":
+		m.envs = nil
+	case "up", "k":
+		if c.cursor > 0 {
+			c.cursor--
+		}
+	case "down", "j":
+		if c.cursor < len(c.row.Envs)-1 {
+			c.cursor++
+		}
+	case "enter":
+		m.envs = nil
+		if c.cursor >= len(c.row.Envs) {
+			return nil
+		}
+		repo, config := c.row.Name, c.row.Envs[c.cursor]
+		if config == c.row.Env {
+			m.message = repo + " already uses " + config
+			return nil
+		}
+		return m.runAll(fmt.Sprintf("switch %s to %s", repo, config), switchEnvCommands(c.row, config)...)
+	}
+	return nil
+}
+
+// switchEnvCommands sets a repo's env and, when it is running, restarts it
+// with the new one: up recreates the container, whose env_file changed, and
+// overmind with it; a host repo's processes reread the env on restart.
+func switchEnvCommands(r orchestrate.ServiceStatus, config string) [][]string {
+	cmds := [][]string{{"env", "use", r.Name + "=" + config}}
+	switch {
+	case !r.Running():
+	case r.RunMode == "host":
+		cmds = append(cmds, []string{"restart", r.Name})
+	default:
+		cmds = append(cmds, []string{"up", "--detach", r.Name})
+	}
+	return cmds
+}
+
 // run runs a neptuno command with the terminal, keeping its output on
 // screen when it fails.
 func (m *dashboard) run(action string, args ...string) tea.Cmd {
-	command := procfile.Quote(m.opts.Neptuno)
-	for _, a := range args {
-		command += " " + procfile.Quote(a)
+	return m.runAll(action, args)
+}
+
+// runAll runs neptuno commands one after another, stopping at the first
+// that fails.
+func (m *dashboard) runAll(action string, cmds ...[]string) tea.Cmd {
+	var commands []string
+	for _, args := range cmds {
+		command := procfile.Quote(m.opts.Neptuno)
+		for _, a := range args {
+			command += " " + procfile.Quote(a)
+		}
+		commands = append(commands, command)
 	}
-	script := command + ` || { status=$?; echo; echo "Press enter to return to the dashboard."; read _; exit $status; }`
+	script := strings.Join(commands, " && ") + ` || { status=$?; echo; echo "Press enter to return to the dashboard."; read _; exit $status; }`
 	cmd := exec.Command("sh", "-c", script)
 	cmd.Dir = m.opts.Root
 	return tea.ExecProcess(cmd, func(err error) tea.Msg { return doneMsg{action, err} })
@@ -264,13 +344,19 @@ func (m *dashboard) View() string {
 		return b.String()
 	}
 	b.WriteString(m.table())
-	if r, ok := m.current(); ok {
+	if m.envs != nil {
+		b.WriteString("\n" + m.envView())
+	} else if r, ok := m.current(); ok {
 		b.WriteString("\n" + m.details(r))
 	}
 	if m.message != "" {
 		b.WriteString("\n" + m.message + "\n")
 	}
-	b.WriteString("\n" + helpStyle.Render("↑↓ move · space select · enter open window · u up · s stop · r restart · c claude · f refresh · q quit") + "\n")
+	help := "↑↓ move · space select · enter open window · u up · s stop · r restart · e env · c claude · f refresh · q quit"
+	if m.envs != nil {
+		help = "↑↓ move · enter switch · esc cancel"
+	}
+	b.WriteString("\n" + helpStyle.Render(help) + "\n")
 	if m.width > 0 {
 		lines := strings.Split(b.String(), "\n")
 		for i, l := range lines {
@@ -316,6 +402,11 @@ func (m *dashboard) table() string {
 			// Color the state after padding, so escapes don't skew columns.
 			state := cells[1]
 			line = strings.Replace(line, state, stateStyle(r).Render(state), 1)
+			if r.Repo {
+				// ENV is the last column, so it can be colored in place.
+				envs := cells[len(cells)-1]
+				line = strings.TrimSuffix(line, envs) + envList(r, " ")
+			}
 			if idx[j] == m.cursor {
 				b.WriteString(cursorStyle.Render("> ") + mark + line + "\n")
 			} else {
@@ -352,7 +443,68 @@ func (m *dashboard) repoCells(r orchestrate.ServiceStatus) []string {
 			date = m.formatDate(g.Date)
 		}
 	}
-	return []string{r.Name, stateLabel(r), procs, branch, commit, date, r.Env}
+	return []string{r.Name, stateLabel(r), procs, branch, commit, date, plainEnvList(r)}
+}
+
+// plainEnvList lists a repo's envs with the active one in brackets, such as
+// "[local] staging production".
+func plainEnvList(r orchestrate.ServiceStatus) string {
+	var out []string
+	for _, name := range envNames(r) {
+		if name == r.Env {
+			name = "[" + name + "]"
+		}
+		out = append(out, name)
+	}
+	return strings.Join(out, " ")
+}
+
+// envList is plainEnvList with the active env highlighted and the others
+// faint.
+func envList(r orchestrate.ServiceStatus, sep string) string {
+	var out []string
+	for _, name := range envNames(r) {
+		if name == r.Env {
+			out = append(out, okStyle.Render("["+name+"]"))
+		} else {
+			out = append(out, labelStyle.Render(name))
+		}
+	}
+	return strings.Join(out, sep)
+}
+
+func envNames(r orchestrate.ServiceStatus) []string {
+	if len(r.Envs) == 0 && r.Env != "" {
+		return []string{r.Env}
+	}
+	return r.Envs
+}
+
+// envView is the env chooser, in place of the details.
+func (m *dashboard) envView() string {
+	c := m.envs
+	var b strings.Builder
+	b.WriteString(nameStyle.Render("Switch "+c.row.Name+"'s env") + labelStyle.Render(" (now "+c.row.Env+")") + "\n")
+	for i, name := range c.row.Envs {
+		line := name
+		if name == c.row.Env {
+			line += labelStyle.Render("  current")
+		}
+		if i == c.cursor {
+			b.WriteString(cursorStyle.Render("> "+name) + strings.TrimPrefix(line, name) + "\n")
+		} else {
+			b.WriteString("  " + line + "\n")
+		}
+	}
+	switch {
+	case !c.row.Running():
+		b.WriteString(labelStyle.Render(c.row.Name+" is stopped; the env applies the next time it starts.") + "\n")
+	case c.row.RunMode == "host":
+		b.WriteString(labelStyle.Render("Switching restarts "+c.row.Name+"'s processes.") + "\n")
+	default:
+		b.WriteString(labelStyle.Render("Switching recreates "+c.row.Name+"'s container and restarts its processes.") + "\n")
+	}
+	return b.String()
 }
 
 func serviceCells(r orchestrate.ServiceStatus) []string {
@@ -422,7 +574,8 @@ func (m *dashboard) details(r orchestrate.ServiceStatus) string {
 		if r.RunMode == "host" {
 			mode = "on the host"
 		}
-		add("Runs", mode+", env "+r.Env)
+		add("Runs", mode)
+		add("Env", envList(r, " · ")+labelStyle.Render("  (e to switch)"))
 		if g := r.Git; g != nil {
 			commit := fmt.Sprintf("%s on %s · %s", g.Commit, g.Branch, g.Subject)
 			add("Commit", commit)
