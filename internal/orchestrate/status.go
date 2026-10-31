@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -36,7 +37,7 @@ type ServiceStatus struct {
 	Processes []ProcessStatus
 	// Window is true when the repo has a window in the project's session.
 	Window bool
-	// Claude is true when a claude-<repo> window is open.
+	// Claude is true when Claude Code is open for the repo.
 	Claude bool
 	// Env is the repo's active configuration, such as local.
 	Env string
@@ -128,6 +129,9 @@ func (o *Orchestrator) Status() []ServiceStatus {
 			}
 			s.Env = st.EnvFor(name, p.Config.DefaultEnv)
 			s.Window, s.Claude = windows[name], windows[ClaudeWindow(name)]
+			if tabs, _, ok := o.overmindWindows(name); ok && slices.Contains(tabs, ClaudeTab) {
+				s.Claude = true
+			}
 			if procs, err := o.Runner.Output(p.Root, "overmind", "status", "-s", socket(name)); err == nil {
 				s.Overmind, s.Processes = true, parseOvermindStatus(procs)
 			}

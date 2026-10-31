@@ -234,15 +234,17 @@ its dev image. Run it inside a repo's container, next to the code, tools and
 services the app really uses:
 
 ```sh
-neptuno claude api                 # opens a claude-api window in the tmux session
+neptuno claude api                 # opens a claude tab in api's window, next to its processes
 neptuno claude api -- --continue   # arguments after -- go to claude
 cd repos/api && neptuno claude     # the repo defaults to the folder you're in
 ```
 
-It starts the container if needed and runs outside overmind, so quitting
-Claude never stops the app. The window always opens in Neptuno's session, next
-to the repos' windows, even when you run it from a shell inside overmind's
-session. Sign-in and settings live in `.neptuno/claude`,
+It starts the repo if needed. Claude gets a `claude` tab among the repo's
+process tabs (`Ctrl-b Ctrl-b n` cycles through them), and quitting it closes
+the tab and leaves the app running. `neptuno down <repo>` closes it with the
+processes. For a repo whose processes an older Neptuno started, it opens a
+`claude-<repo>` window instead until you run `neptuno down` and `neptuno up`
+for that repo. Sign-in and settings live in `.neptuno/claude`,
 mounted at `/root/.claude` in every repo `neptuno add` creates, so you sign in
 once per project and it survives rebuilds. For services added before this, add
 `"./.neptuno/claude:/root/.claude"` to their `volumes` (or set
