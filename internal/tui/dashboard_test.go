@@ -7,6 +7,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/robertoplancarte/neptuno/internal/env"
 	"github.com/robertoplancarte/neptuno/internal/orchestrate"
 )
 
@@ -37,6 +39,8 @@ func key(m *dashboard, keys ...string) tea.Cmd {
 			msg = tea.KeyMsg{Type: tea.KeyEnter}
 		case "down":
 			msg = tea.KeyMsg{Type: tea.KeyDown}
+		case "tab":
+			msg = tea.KeyMsg{Type: tea.KeyTab}
 		case "esc":
 			msg = tea.KeyMsg{Type: tea.KeyEsc}
 		case " ":
@@ -144,5 +148,68 @@ func TestSwitchEnvCommands(t *testing.T) {
 	rows[1].Overmind = true
 	if got, want := switchEnvCommands(rows[1], "local"), [][]string{{"env", "use", "docs=local"}, {"restart", "docs"}}; !reflect.DeepEqual(got, want) {
 		t.Errorf("running host repo: %v", got)
+	}
+}
+
+func TestDashboardPanels(t *testing.T) {
+	m := newTestDashboard()
+	m.opts.Vars = func(repo string) ([]env.Var, error) {
+		return []env.Var{{Key: "PORT", Value: "3000", Source: "environments/" + repo + "/base.env"}}, nil
+	}
+	m.opts.Logs = func(name string) (string, error) { return "line 1\nline 2\n" + name + " booted", nil }
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	if len(lines) != 30 {
+		t.Errorf("view has %d lines, want 30", len(lines))
+	}
+	for i, l := range lines {
+		if w := lipgloss.Width(l); w > 120 {
+			t.Errorf("line %d is %d wide:\n%s", i, w, l)
+		}
+	}
+	for _, want := range []string{"Project", "Repos 2", "Services 1", "Info", "Logs", "abc1234", "Add login", "enter open"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("panel view missing %q:\n%s", want, view)
+		}
+	}
+
+	// ] moves to the Env tab, which loads off the UI goroutine.
+	cmd := key(m, "]")
+	if m.tab != tabEnv || cmd == nil || !strings.Contains(m.View(), "Loading") {
+		t.Fatalf("] did not switch to a loading Env tab: tab %d", m.tab)
+	}
+	m.Update(panelMsg{m.panelKey(), envText(m.rows[0], m.opts.Vars)})
+	if view := m.View(); !strings.Contains(view, "PORT=3000") || !strings.Contains(view, "environments/api/base.env") {
+		t.Errorf("Env tab:\n%s", view)
+	}
+	// A late answer for another row is dropped.
+	m.Update(panelMsg{"1:docs:staging", "stale"})
+	if strings.Contains(m.View(), "stale") {
+		t.Error("stale panel content shown")
+	}
+
+	key(m, "]")
+	m.Update(panelMsg{m.panelKey(), logsText(m.rows[0], m.opts.Logs)})
+	if view := m.View(); m.tab != tabLogs || !strings.Contains(view, "api booted") {
+		t.Errorf("Logs tab:\n%s", view)
+	}
+	key(m, "]")
+	if m.tab != tabInfo {
+		t.Errorf("tabs do not wrap: %d", m.tab)
+	}
+
+	// tab jumps to the services list and back to where it was.
+	key(m, "down", "tab")
+	if r, _ := m.current(); r.Name != "postgres" {
+		t.Errorf("tab went to %s, want postgres", r.Name)
+	}
+	key(m, "tab")
+	if r, _ := m.current(); r.Name != "docs" {
+		t.Errorf("tab back went to %s, want docs", r.Name)
+	}
+	if !strings.Contains(logsText(m.rows[1], m.opts.Logs), "runs on the host") {
+		t.Error("host repo logs should point at its window")
 	}
 }
