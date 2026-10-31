@@ -243,3 +243,19 @@ func (o *Orchestrator) gitStatus(dir string) *GitStatus {
 	}
 	return g
 }
+
+// EnvVars resolves a repo's variables for its active configuration, as `neptuno
+// env show` prints them.
+func (o *Orchestrator) EnvVars(repo string) ([]env.Var, error) {
+	p := o.Project
+	st, err := state.Load(p.Root)
+	if err != nil {
+		return nil, err
+	}
+	return env.Resolver{Dir: p.Path("environments")}.Resolve(repo, st.EnvFor(repo, p.Config.DefaultEnv), nil)
+}
+
+// Logs returns the last lines a service's container printed.
+func (o *Orchestrator) Logs(service string) (string, error) {
+	return o.Runner.Output(o.Project.Root, "docker", "compose", "logs", "--no-color", "--no-log-prefix", "--tail", "300", service)
+}

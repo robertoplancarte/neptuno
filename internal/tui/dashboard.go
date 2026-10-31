@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/robertoplancarte/neptuno/internal/env"
 	"github.com/robertoplancarte/neptuno/internal/orchestrate"
 	"github.com/robertoplancarte/neptuno/internal/procfile"
 )
@@ -25,6 +26,10 @@ type DashboardOptions struct {
 	Status func() []orchestrate.ServiceStatus
 	// Refresh is how often Status runs. Zero means every two seconds.
 	Refresh time.Duration
+	// Vars resolves a repo's env, for the Env tab.
+	Vars func(repo string) ([]env.Var, error)
+	// Logs returns a service's recent container output, for the Logs tab.
+	Logs func(name string) (string, error)
 }
 
 type (
@@ -45,10 +50,19 @@ type dashboard struct {
 	cursor   int
 	selected map[string]bool
 	width    int
+	height   int
 	message  string
-	now      func() time.Time
+	// tab is the right panel's tab, scroll how far it is scrolled, and
+	// panel the Env or Logs content last loaded.
+	tab    int
+	scroll int
+	panel  panelMsg
+	// lastIn remembers the cursor in the repos (true) and services lists,
+	// for tab.
+	now func() time.Time
 	// envs is the open env chooser, or nil.
-	envs *envChooser
+	envs   *envChooser
+	lastIn map[bool]int
 }
 
 // envChooser picks the configuration a repo runs with.
@@ -68,7 +82,7 @@ func newDashboard(opts DashboardOptions) *dashboard {
 	if opts.Refresh == 0 {
 		opts.Refresh = 2 * time.Second
 	}
-	return &dashboard{opts: opts, selected: map[string]bool{}, now: time.Now}
+	return &dashboard{opts: opts, selected: map[string]bool{}, now: time.Now, lastIn: map[bool]int{}}
 }
 
 // RunDashboard shows the interactive dashboard until the user quits.
@@ -111,11 +125,16 @@ func (m *dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = 0
 		}
 		if first {
-			return m, m.tick()
+			return m, tea.Batch(m.tick(), m.fetchPanel())
 		}
 		return m, nil
 	case tickMsg:
-		return m, tea.Batch(m.refresh(), m.tick())
+		return m, tea.Batch(m.refresh(), m.tick(), m.fetchPanel())
+	case panelMsg:
+		if msg.key == m.panelKey() {
+			m.panel = msg
+		}
+		return m, nil
 	case doneMsg:
 		if msg.err != nil {
 			m.message = warnStyle.Render(fmt.Sprintf("%s failed: %v", msg.action, msg.err))
@@ -124,10 +143,19 @@ func (m *dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.refresh()
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
+		m.width, m.height = msg.Width, msg.Height
 		return m, nil
 	case tea.KeyMsg:
-		return m.key(msg.String())
+		cursor, tab := m.cursor, m.tab
+		model, cmd := m.key(msg.String())
+		if m.cursor != cursor || m.tab != tab {
+			m.scroll = 0
+			if r, ok := m.current(); ok {
+				m.lastIn[r.Repo] = m.cursor
+			}
+			cmd = tea.Batch(cmd, m.fetchPanel())
+		}
+		return model, cmd
 	}
 	return m, nil
 }
@@ -177,6 +205,30 @@ func (m *dashboard) key(key string) (tea.Model, tea.Cmd) {
 		}
 	case "q", "esc", "ctrl+c":
 		return m, tea.Quit
+	case "tab", "shift+tab":
+		// Jump between the repos and services lists, where it last was.
+		inRepos := ok && row.Repo
+		if i, seen := m.lastIn[!inRepos]; seen && i < len(m.rows) && m.rows[i].Repo == !inRepos {
+			m.cursor = i
+			break
+		}
+		for i, r := range m.rows {
+			if r.Repo == !inRepos {
+				m.cursor = i
+				break
+			}
+		}
+	case "]", "right", "l":
+		m.tab = (m.tab + 1) % len(tabNames)
+	case "[", "left", "h":
+		m.tab = (m.tab + len(tabNames) - 1) % len(tabNames)
+	case "pgup", "ctrl+u", "pgdown", "ctrl+d":
+		// Logs scroll back from the end; the other tabs scroll down.
+		step := 10
+		if (key == "pgup" || key == "ctrl+u") == (m.tab != tabLogs) {
+			step = -10
+		}
+		m.scroll = max(0, m.scroll+step)
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
@@ -333,6 +385,14 @@ func (m *dashboard) open(window string) tea.Cmd {
 }
 
 func (m *dashboard) View() string {
+	if m.loaded && m.width >= 70 && m.height >= 14 {
+		return m.layoutView()
+	}
+	return m.compactView()
+}
+
+// compactView is the dashboard as a plain list, for small terminals.
+func (m *dashboard) compactView() string {
 	var b strings.Builder
 	title := nameStyle.Render("Neptuno") + " · " + m.opts.Project
 	if !m.updated.IsZero() {

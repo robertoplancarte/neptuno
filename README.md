@@ -212,9 +212,21 @@ with its container state and published ports. The row under the cursor shows
 more: the commit's subject and author, each process and its state, the
 container's health and what it depends on. It refreshes every two seconds.
 
+The screen is split into panels: the project, the repos and the services
+stacked on the left, with the focused list's border highlighted, and on the
+right a panel for the row under the cursor with three tabs. **Info** has the
+details above, **Env** has the repo's resolved variables and the file each
+came from (as `neptuno env show` prints them), and **Logs** follows the
+container's output (`docker compose logs`); a `run: host` repo's output is in
+its window. The keys run along the bottom. In a terminal under 70×14 it
+falls back to a plain list.
+
 | Key | Does |
 | --- | --- |
 | `↑` `↓` / `j` `k` | move |
+| `tab` | jump between the repos and services lists |
+| `[` `]` / `←` `→` | switch the right panel's tab |
+| `PgUp` `PgDn` / `ctrl+u` `ctrl+d` | scroll the right panel |
 | `space` | select rows; `a` selects all |
 | `enter` | open the repo's window |
 | `u` | start the selected rows, or the one under the cursor (`neptuno up -d`) |

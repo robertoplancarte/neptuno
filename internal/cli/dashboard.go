@@ -32,6 +32,8 @@ func runDashboard(cmd *cobra.Command) error {
 		Session: o.SessionName(),
 		Neptuno: o.Neptuno,
 		Status:  o.Status,
+		Vars:    o.EnvVars,
+		Logs:    o.Logs,
 	})
 }
 
