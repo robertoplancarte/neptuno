@@ -4,7 +4,10 @@ services: [postgres, valkey, s3]
 # Installed gems live in a named volume, so they survive container rebuilds
 # and only change when Gemfile.lock does.
 volumes: ["{{.Name}}_bundle:/usr/local/bundle"]
+# The marker tells entrypoint.sh this is a new app; rails new goes last, as
+# options append their flags to it.
 generate: >-
+  mkdir -p tmp && touch tmp/neptuno-new-app &&
   gem install rails -v '~> 8.0' --no-document &&
   rails new . --name={{.Name}} --database=postgresql
   --skip-git --skip-docker --skip-kamal --skip-thruster

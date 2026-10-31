@@ -63,6 +63,15 @@ func TestWrapContainerWaitsForEntrypoint(t *testing.T) {
 	if err == nil || strings.Contains(string(out), "started") || !strings.Contains(string(out), "api entrypoint.sh failed") {
 		t.Errorf("setup failed: %q, %v", out, err)
 	}
+
+	// The window shows why setup failed.
+	if err := os.WriteFile(dir+"/neptuno-setup.log", []byte("PG::DuplicateTable\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, _ = exec.Command("sh", "-c", script).CombinedOutput()
+	if !strings.Contains(string(out), "PG::DuplicateTable") || !strings.Contains(string(out), "docker compose restart api && neptuno restart api") {
+		t.Errorf("setup log: %q", out)
+	}
 }
 
 func TestWrapHost(t *testing.T) {
