@@ -12,8 +12,8 @@ func newClaudeCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "claude [repo] [-- claude-args...]",
 		Short: "Run Claude Code inside a repo's container",
-		Long: "Opens Claude Code inside the repo's running container, in a claude-<repo>\n" +
-			"window of the project's tmux session, starting the container if needed.\n" +
+		Long: "Opens Claude Code inside the repo's running container, in a claude tab of\n" +
+			"the repo's window, next to its processes, starting the repo if needed.\n" +
 			"Claude sees the repo's code, tools and services exactly as the app does.\n\n" +
 			"The repo defaults to the one whose folder you are in. Sign-in and settings\n" +
 			"live in .neptuno/claude, mounted into every repo's container, so you sign in\n" +
@@ -42,6 +42,6 @@ func newClaudeCommand() *cobra.Command {
 			return o.Claude(orchestrate.ClaudeOptions{Repo: repo, Args: claudeArgs, Detach: detach})
 		},
 	}
-	cmd.Flags().BoolVarP(&detach, "detach", "d", false, "open the window without attaching to it")
+	cmd.Flags().BoolVarP(&detach, "detach", "d", false, "open the tab without attaching to it")
 	return cmd
 }

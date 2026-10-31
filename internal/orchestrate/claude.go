@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/robertoplancarte/neptuno/internal/procfile"
@@ -24,15 +25,19 @@ type ClaudeOptions struct {
 	Detach bool
 }
 
-// ClaudeWindow is the tmux window Claude Code runs in for a repo.
+// ClaudeTab is the window Claude Code runs in inside a repo's overmind
+// session, next to the process windows.
+const ClaudeTab = "claude"
+
+// ClaudeWindow is the outer session's window Claude Code runs in for a repo
+// whose overmind an older neptuno started, without a known tmux socket.
 func ClaudeWindow(repo string) string {
 	return "claude-" + repo
 }
 
-// Claude runs Claude Code inside the repo's running container, in its own
-// window of the project's tmux session, starting the container first if it
-// is not running. It runs outside overmind, so quitting Claude never stops
-// the repo's processes.
+// Claude runs Claude Code inside the repo's running container, in a claude
+// tab of the repo's window, next to its processes, starting the repo first if
+// needed. Quitting Claude closes the tab and leaves the processes running.
 func (o *Orchestrator) Claude(opts ClaudeOptions) error {
 	p, repo := o.Project, opts.Repo
 	if !p.IsRepo(repo) {
@@ -60,33 +65,58 @@ func (o *Orchestrator) Claude(opts ClaudeOptions) error {
 	}
 
 	running, _ := o.Runner.Output(p.Root, "docker", "compose", "ps", "--quiet", "--status", "running", repo)
-	if running == "" {
+	if running == "" || !o.Runner.Check(p.Root, "overmind", "status", "-s", socket(repo)) {
 		fmt.Fprintf(o.Log, "%s is not running; starting it first\n", repo)
 		if err := o.Up(UpOptions{Selected: []string{repo}, Detach: true}); err != nil {
 			return err
 		}
 	}
 
-	window := ClaudeWindow(repo)
+	q := procfile.Quote
+	args := []string{"docker", "compose", "exec", q(repo), "claude"}
+	for _, a := range opts.Args {
+		args = append(args, q(a))
+	}
+	// Keep the window open on failure, such as claude missing from an
+	// older image, so the error can be read.
+	command := strings.Join(args, " ") +
+		`; status=$?; if [ $status -ne 0 ]; then echo; echo "claude exited with status $status. Press enter to close this window."; read _; fi`
+
+	windows, sock, ok := o.overmindWindows(repo)
+	if !ok {
+		fmt.Fprintf(o.Log, "%s's processes were started by an older neptuno, so Claude Code opens in its own window.\n"+
+			"Run `neptuno down %s` and `neptuno up %s` to get it as a tab in %s's window.\n", repo, repo, repo, repo)
+		return o.claudeWindow(opts, command)
+	}
+	if slices.Contains(windows, ClaudeTab) {
+		fmt.Fprintf(o.Log, "Claude Code is already open in %s's %s tab\n", repo, ClaudeTab)
+	} else {
+		fmt.Fprintf(o.Log, "Starting Claude Code in the %s container\n", repo)
+		if err := o.Runner.Run(p.Root, "tmux", "-S", sock, "new-window", "-d", "-n", ClaudeTab, "-c", p.Root, claudeMark+command); err != nil {
+			return err
+		}
+	}
+	_ = o.Runner.Run(p.Root, "tmux", "-S", sock, "select-window", "-t", ":"+ClaudeTab)
+	if opts.Detach {
+		fmt.Fprintf(o.Log, "It is the %s tab of tmux window %s:%s\n", ClaudeTab, o.SessionName(), repo)
+		return nil
+	}
+	_ = o.Runner.Run(p.Root, "tmux", "select-window", "-t", o.target(repo))
+	return o.attach()
+}
+
+// claudeWindow opens Claude Code in a claude-<repo> window of the outer
+// session.
+func (o *Orchestrator) claudeWindow(opts ClaudeOptions, command string) error {
+	p, window := o.Project, ClaudeWindow(opts.Repo)
 	if o.hasWindow(window) {
 		fmt.Fprintf(o.Log, "Claude Code is already open in tmux window %s:%s\n", o.SessionName(), window)
 	} else {
-		q := procfile.Quote
-		args := []string{"docker", "compose", "exec", q(repo), "claude"}
-		for _, a := range opts.Args {
-			args = append(args, q(a))
-		}
-		// Keep the window open on failure, such as claude missing from an
-		// older image, so the error can be read.
-		command := strings.Join(args, " ") +
-			`; status=$?; if [ $status -ne 0 ]; then echo; echo "claude exited with status $status. Press enter to close this window."; read _; fi`
-
-		fmt.Fprintf(o.Log, "Starting Claude Code in the %s container\n", repo)
+		fmt.Fprintf(o.Log, "Starting Claude Code in the %s container\n", opts.Repo)
 		if err := o.newWindow(window, command); err != nil {
 			return err
 		}
 	}
-
 	if opts.Detach {
 		fmt.Fprintf(o.Log, "Attach with: tmux attach -t %s:%s\n", o.SessionName(), window)
 		return nil

@@ -189,9 +189,9 @@ func newPaneDiedCommand() *cobra.Command {
 			tmux := func(args ...string) *exec.Cmd {
 				return exec.Command("tmux", append([]string{"-S", socket}, args...)...)
 			}
-			// The shell that replaced the process exited: close its pane.
-			// overmind's restart respawns the pane with the process again.
-			if out, _ := tmux("display-message", "-p", "-t", pane, "#{pane_start_command}").Output(); orchestrate.IsDeadPaneCommand(string(out)) {
+			// The shell that replaced the process, or Claude, exited: close
+			// its pane. overmind's restart reopens a process's window.
+			if out, _ := tmux("display-message", "-p", "-t", pane, "#{pane_start_command}").Output(); orchestrate.ClosesOnExit(string(out)) {
 				return tmux("kill-pane", "-t", pane).Run()
 			}
 			return tmux("respawn-pane", "-k", "-t", pane, orchestrate.DeadPaneCommand(repo, process, status)).Run()

@@ -606,7 +606,7 @@ func (m *dashboard) details(r orchestrate.ServiceStatus) string {
 			win = append(win, r.Name+" (enter)")
 		}
 		if r.Claude {
-			win = append(win, orchestrate.ClaudeWindow(r.Name))
+			win = append(win, "claude")
 		}
 		if len(win) > 0 {
 			add("Windows", strings.Join(win, ", "))

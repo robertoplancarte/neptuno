@@ -326,6 +326,7 @@ func TestClaudeInRunningContainer(t *testing.T) {
 	t.Setenv("TMUX", "")
 	o, f := setup(t)
 	f.containers["api"] = []string{"abc123"}
+	f.overminds[socket("api")] = true // started by an older neptuno: no tmux socket file
 	var log strings.Builder
 	o.Log = &log
 
@@ -481,7 +482,52 @@ func TestUseOuterTmux(t *testing.T) {
 }
 
 func TestDeadPaneCommandIsMarked(t *testing.T) {
-	if !IsDeadPaneCommand(DeadPaneCommand("shop", "web", "1")) || IsDeadPaneCommand("bin/rails server") {
+	if !ClosesOnExit(DeadPaneCommand("shop", "web", "1")) || ClosesOnExit("bin/rails server") {
 		t.Error("IsDeadPaneCommand cannot tell the shell from the process")
+	}
+}
+
+func TestClaudeOpensATabInTheReposWindow(t *testing.T) {
+	t.Setenv("TMUX", "")
+	o, f := setup(t)
+	f.containers["api"] = []string{"abc123", "abc123"}
+	f.overminds[socket("api")] = true
+	if err := os.MkdirAll(o.Project.Path(".neptuno", "run"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(o.Project.Path(overmindTmuxFile("api")), []byte("/tmp/om\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.overmindWindows = "web\nworker\n"
+	o.Log = io.Discard
+
+	if err := o.Claude(ClaudeOptions{Repo: "api"}); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, c := range f.cmds {
+		got = append(got, strings.ReplaceAll(c, o.Project.Root, "ROOT"))
+	}
+	want := []string{
+		"tmux -S /tmp/om new-window -d -n claude -c ROOT : neptuno-claude; docker compose exec api claude; " +
+			`status=$?; if [ $status -ne 0 ]; then echo; echo "claude exited with status $status. Press enter to close this window."; read _; fi`,
+		"tmux -S /tmp/om select-window -t :claude",
+		"tmux select-window -t =neptuno-acme:api",
+		"attach: tmux attach-session -t =neptuno-acme",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("commands:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if !ClosesOnExit(strings.TrimPrefix(want[0], "tmux -S /tmp/om new-window -d -n claude -c ROOT ")) {
+		t.Error("the pane-died hook would turn Claude's tab into a shell")
+	}
+
+	f.cmds = nil
+	f.overmindWindows = "web\nworker\nclaude\n"
+	if err := o.Claude(ClaudeOptions{Repo: "api", Detach: true}); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.cmds) != 1 || f.cmds[0] != "tmux -S /tmp/om select-window -t :claude" {
+		t.Errorf("with the tab open, ran:\n%s", strings.Join(f.cmds, "\n"))
 	}
 }

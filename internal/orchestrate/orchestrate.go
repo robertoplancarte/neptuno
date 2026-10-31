@@ -417,10 +417,15 @@ func UseOuterTmux() {
 // shell from the process it replaced.
 const deadPaneMark = ": neptuno-shell; "
 
-// IsDeadPaneCommand reports whether a pane's start command is
-// DeadPaneCommand's, as tmux shows it.
-func IsDeadPaneCommand(command string) bool {
-	return strings.Contains(command, strings.TrimSpace(deadPaneMark))
+// claudeMark starts the command of Claude's tab in overmind's session.
+const claudeMark = ": neptuno-claude; "
+
+// ClosesOnExit reports whether the pane-died hook closes a pane with this
+// start command, as tmux shows it, instead of leaving a shell: the shell
+// DeadPaneCommand left, or Claude's tab.
+func ClosesOnExit(command string) bool {
+	return strings.Contains(command, strings.TrimSpace(deadPaneMark)) ||
+		strings.Contains(command, strings.TrimSpace(claudeMark))
 }
 
 // DeadPaneCommand is what the window of a process that exited runs instead:
@@ -460,11 +465,10 @@ func (o *Orchestrator) Restart(repo, process string) error {
 // one.
 func (o *Orchestrator) reopenClosedWindows(repo, process string) error {
 	p := o.Project
-	b, err := os.ReadFile(p.Path(overmindTmuxFile(repo)))
-	if err != nil {
-		return nil // an overmind started by an older neptuno
+	open, sock, ok := o.overmindWindows(repo)
+	if !ok {
+		return nil
 	}
-	sock := strings.TrimSpace(string(b))
 	entries, err := procfile.ParseFile(o.generatedProcfile(repo))
 	if err != nil {
 		return err
@@ -479,11 +483,6 @@ func (o *Orchestrator) reopenClosedWindows(repo, process string) error {
 		}
 		names = []string{process}
 	}
-	out, err := o.Runner.Output(p.Root, "tmux", "-S", sock, "list-windows", "-a", "-F", "#{window_name}")
-	if err != nil {
-		return nil
-	}
-	open := strings.Fields(out)
 	for _, name := range names {
 		if !slices.Contains(open, name) {
 			if err := o.Runner.Run(p.Root, "tmux", "-S", sock, "new-window", "-d", "-n", name, "sleep 60"); err != nil {
@@ -492,6 +491,22 @@ func (o *Orchestrator) reopenClosedWindows(repo, process string) error {
 		}
 	}
 	return nil
+}
+
+// overmindWindows lists the windows of the repo's overmind session and the
+// socket of its tmux server. ok is false when they are unknown: overmind is
+// not running, or an older neptuno started it.
+func (o *Orchestrator) overmindWindows(repo string) (windows []string, sock string, ok bool) {
+	b, err := os.ReadFile(o.Project.Path(overmindTmuxFile(repo)))
+	if err != nil {
+		return nil, "", false
+	}
+	sock = strings.TrimSpace(string(b))
+	out, err := o.Runner.Output(o.Project.Root, "tmux", "-S", sock, "list-windows", "-a", "-F", "#{window_name}")
+	if err != nil {
+		return nil, "", false
+	}
+	return strings.Fields(out), sock, true
 }
 
 // connectCommand is the shell command the repo's window runs: it attaches to

@@ -43,15 +43,16 @@ set_aside_old_database() {
   ' && rm -f tmp/neptuno-new-app
 }
 # The storage_s3 option keeps uploads in this bucket on SeaweedFS. It is
-# created in the background, as SeaweedFS can take a while to start; creating
-# one that exists is harmless.
+# created in the background, as SeaweedFS can take a while to start. 409 means
+# it already exists, as on every start after the first.
 if [ -n "$S3_BUCKET" ] && [ -n "$AWS_ENDPOINT" ]; then
   (
     for _ in $(seq 1 120); do
-      curl -fsS -o /dev/null -X PUT "$AWS_ENDPOINT/$S3_BUCKET" 2>/dev/null && exit 0
+      status=$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$AWS_ENDPOINT/$S3_BUCKET")
+      case "$status" in 200 | 409) exit 0 ;; esac
       sleep 2
     done
-    echo "entrypoint.sh: could not create bucket $S3_BUCKET at $AWS_ENDPOINT" >&2
+    echo "entrypoint.sh: could not create bucket $S3_BUCKET at $AWS_ENDPOINT (last HTTP status: $status)" >&2
   ) &
 fi
 
