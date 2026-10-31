@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -24,6 +25,8 @@ type fakeRunner struct {
 	// containers maps a service to the IDs `docker compose ps` returns on
 	// successive calls.
 	containers map[string][]string
+	// overmindWindows is what list-windows prints for overmind's session.
+	overmindWindows string
 }
 
 func (f *fakeRunner) Run(dir, name string, args ...string) error {
@@ -82,6 +85,9 @@ func (f *fakeRunner) Output(dir, name string, args ...string) (string, error) {
 			}
 		}
 		return "", nil
+	}
+	if name == "tmux" && slices.Contains(args, "list-windows") {
+		return f.overmindWindows, nil
 	}
 	svc := args[len(args)-1]
 	ids := f.containers[svc]
@@ -396,6 +402,8 @@ func TestUpWritesTmuxConfigWithPaneDiedHook(t *testing.T) {
 	}
 	conf := read(t, filepath.Join(o.Project.Root, ".neptuno/run/api.tmux.conf"))
 	if !strings.Contains(conf, "source-file -q ~/.tmux.conf") ||
+		!strings.Contains(conf, "set-environment -g NEPTUNO_TMUX ") ||
+		!strings.Contains(conf, `run-shell "echo '#{socket_path}' > `) ||
 		!strings.Contains(conf, `set-hook -g pane-died "run-shell \"/bin/neptuno pane-died api '#{socket_path}' '#{pane_id}'`) {
 		t.Errorf("tmux config:\n%s", conf)
 	}
@@ -423,5 +431,52 @@ func TestRestart(t *testing.T) {
 	}
 	if last := f.cmds[len(f.cmds)-1]; last != "overmind restart -s .neptuno/run/api.sock web" {
 		t.Errorf("ran %q", last)
+	}
+}
+
+func TestRestartReopensClosedWindows(t *testing.T) {
+	t.Setenv("TMUX", "")
+	o, f := setup(t)
+	if err := o.Up(UpOptions{Selected: []string{"api"}, Detach: true}); err != nil {
+		t.Fatal(err)
+	}
+	// overmind's tmux server records its socket on start.
+	if err := os.WriteFile(o.Project.Path(overmindTmuxFile("api")), []byte("/tmp/om\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.overmindWindows = "web\n" // the worker window was closed
+	f.cmds = nil
+	if err := o.Restart("api", ""); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"tmux -S /tmp/om new-window -d -n worker sleep 60",
+		"overmind restart -s .neptuno/run/api.sock",
+	}
+	if !reflect.DeepEqual(f.cmds, want) {
+		t.Errorf("commands:\n%s", strings.Join(f.cmds, "\n"))
+	}
+	if err := o.Restart("api", "nope"); err == nil || !strings.Contains(err.Error(), "web, worker") {
+		t.Errorf("unknown process: %v", err)
+	}
+}
+
+func TestUseOuterTmux(t *testing.T) {
+	t.Setenv(OuterTmuxEnv, "/tmp/tmux-0/default")
+	t.Setenv("TMUX", "/tmp/tmux-0/overmind-acme-api-x,12,0")
+	UseOuterTmux()
+	if got := os.Getenv("TMUX"); got != "/tmp/tmux-0/default,0,0" {
+		t.Errorf("inside overmind's session, TMUX = %q", got)
+	}
+	t.Setenv("TMUX", "/tmp/tmux-0/default,5,1")
+	UseOuterTmux()
+	if got := os.Getenv("TMUX"); got != "/tmp/tmux-0/default,5,1" {
+		t.Errorf("in the outer session, TMUX = %q", got)
+	}
+}
+
+func TestDeadPaneCommandIsMarked(t *testing.T) {
+	if !IsDeadPaneCommand(DeadPaneCommand("shop", "web", "1")) || IsDeadPaneCommand("bin/rails server") {
+		t.Error("IsDeadPaneCommand cannot tell the shell from the process")
 	}
 }
