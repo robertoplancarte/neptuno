@@ -186,8 +186,19 @@ and `bin/rails db:prepare` in the `rails` stack, goes in
 `ENTRYPOINT`. It runs each time the container starts. When a repo has an
 `entrypoint.sh`, its processes wait until the script touches
 `/dev/shm/neptuno-ready`, or stop with an error if it touches
-`/dev/shm/neptuno-failed`; its output is in `docker compose logs <repo>`. The
-script ends with `exec "$@"` so the container goes on to run its command.
+`/dev/shm/neptuno-failed`; its output is in `docker compose logs <repo>`. If
+setup fails, each process window shows the end of its output and how to retry.
+The script ends with `exec "$@"` so the container goes on to run its command.
+
+The `rails` entrypoint runs `bin/rails db:prepare`, so the database keeps its
+data between starts. To start from a fresh one every time, put
+`NEPTUNO_RESET_DB=1` in a git-ignored `environments/<repo>/*.local.env` (for
+example `environments/shop/me.local.env`), and every container start drops the
+database, migrates and seeds it. For a one-off reset, run
+`neptuno up shop --set NEPTUNO_RESET_DB=1`. When `neptuno add` generates a
+new app over a database an earlier app of the same name left, the first start
+renames the old one to `<name>_development_old_<time>` instead of failing on
+tables that already exist.
 Rebuild the image (`docker compose build <repo>`) after changing it.
 
 ## Claude Code in your containers

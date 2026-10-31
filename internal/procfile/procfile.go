@@ -58,6 +58,9 @@ func ParseFile(path string) ([]Entry, error) {
 const (
 	ReadyMarker  = "/dev/shm/neptuno-ready"
 	FailedMarker = "/dev/shm/neptuno-failed"
+	// SetupLog holds the entrypoint's setup output, which a process shows
+	// when setup failed.
+	SetupLog = "/dev/shm/neptuno-setup.log"
 )
 
 // WrapContainer runs each command inside the compose service with
@@ -70,8 +73,10 @@ func WrapContainer(entries []Entry, service string, waitForEntrypoint bool) []En
 		done := fmt.Sprintf("[ -e %s ] || [ -e %s ]", ReadyMarker, FailedMarker)
 		wait = fmt.Sprintf("if ! { %[1]s; }; then echo \"Waiting for the %[3]s entrypoint.sh to finish (docker compose logs -f %[3]s)\"; "+
 			"until %[1]s; do sleep 1; done; fi; "+
-			"if [ -e %[2]s ]; then echo \"The %[3]s entrypoint.sh failed; see docker compose logs %[3]s\" >&2; exit 1; fi; ",
-			done, FailedMarker, service)
+			"if [ -e %[2]s ]; then { echo \"The %[3]s entrypoint.sh failed, so this process did not start.\"; "+
+			"if [ -s %[4]s ]; then echo \"Its last lines (all of them: docker compose logs %[3]s):\"; echo; tail -n 40 %[4]s; else echo \"See docker compose logs %[3]s\"; fi; "+
+			"echo; echo \"Fix it, then run: docker compose restart %[3]s && neptuno restart %[3]s\"; } >&2; exit 1; fi; ",
+			done, FailedMarker, service, SetupLog)
 	}
 	out := make([]Entry, len(entries))
 	for i, e := range entries {
