@@ -183,3 +183,35 @@ func quote(v string) string {
 	}
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`).Replace(v) + `"`
 }
+
+// Configs lists the configurations a repo can switch to: every <name>.env in
+// environments/_shared and environments/<repo>, apart from base.env and
+// personal *.local.env files, plus always, which is listed first, sorted.
+func (r Resolver) Configs(repo string, always ...string) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(name string) {
+		if name != "" && !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	for _, name := range always {
+		add(name)
+	}
+	var found []string
+	for _, dir := range []string{SharedDir, repo} {
+		matches, _ := filepath.Glob(filepath.Join(r.Dir, dir, "*.env"))
+		for _, m := range matches {
+			name := strings.TrimSuffix(filepath.Base(m), ".env")
+			if name != "base" && !strings.HasSuffix(name, ".local") {
+				found = append(found, name)
+			}
+		}
+	}
+	sort.Strings(found)
+	for _, name := range found {
+		add(name)
+	}
+	return out
+}

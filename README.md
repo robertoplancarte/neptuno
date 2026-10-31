@@ -206,7 +206,8 @@ Rebuild the image (`docker compose build <repo>`) after changing it.
 Run `neptuno` with no arguments inside a project to open the dashboard. It
 lists every repo with its state, how many of its overmind processes are
 running, its branch, the commit it is at (`*` when the work tree has
-uncommitted changes) and that commit's date, and every other compose service
+uncommitted changes), that commit's date and its envs, with the active one in
+brackets (`[local] staging production`), and every other compose service
 with its container state and published ports. The row under the cursor shows
 more: the commit's subject and author, each process and its state, the
 container's health and what it depends on. It refreshes every two seconds.
@@ -219,8 +220,15 @@ container's health and what it depends on. It refreshes every two seconds.
 | `u` | start the selected rows, or the one under the cursor (`neptuno up -d`) |
 | `s` | stop them (`neptuno down`) |
 | `r` | restart a repo's processes |
+| `e` | switch a repo's env, then restart it if it is running |
 | `c` | open Claude Code in a repo's container |
 | `q` | quit |
+
+A repo's envs are the `<name>.env` files in `environments/_shared` and
+`environments/<repo>` (not `base.env` or `*.local.env`), plus the default.
+Picking one with `e` runs `neptuno env use <repo>=<env>`; if the repo is
+running, `neptuno up` then recreates its container with the new env and
+restarts its processes (a `run: host` repo gets `neptuno restart`).
 
 `neptuno up` makes the dashboard the first window of the `neptuno-<project>`
 session, named `neptuno`, so attaching lands on it. Quitting it closes that

@@ -59,6 +59,12 @@ func TestStatus(t *testing.T) {
 	if !api.Repo || !api.Overmind || !api.Window || !api.Claude || api.Env != "local" || api.State() != "partial" {
 		t.Errorf("api = %+v (state %s)", api, api.State())
 	}
+	if want := []string{"local", "staging"}; !reflect.DeepEqual(api.Envs, want) {
+		t.Errorf("api envs = %v, want %v", api.Envs, want)
+	}
+	if want := []string{"local"}; !reflect.DeepEqual(got["web"].Envs, want) {
+		t.Errorf("web envs = %v, want %v", got["web"].Envs, want)
+	}
 	if want := []ProcessStatus{{"web", "running"}, {"worker", "dead"}}; !reflect.DeepEqual(api.Processes, want) {
 		t.Errorf("api processes = %v", api.Processes)
 	}
