@@ -1,0 +1,41 @@
+---
+name: neptuno-debug-service
+description: Find out why a repo or service in this Neptuno project won't start, keeps crashing, or doesn't answer at http://<repo>.localhost. Use when a service is down, partial, unhealthy, or returns errors like 502.
+---
+
+# Debug a service in {{.Name}}
+
+Work from the outside in and stop at the first thing that is wrong.
+
+1. **State.** `neptuno status` shows each repo's container state and how
+   many of its processes run. `stopped` means it was never started:
+   `neptuno up -d <repo>`.
+2. **Container.** `docker compose ps <repo>` and
+   `docker compose logs --tail 200 <repo>`. A container that exits right
+   away usually failed in `dockerfiles/<repo>/entrypoint.sh` (gems,
+   packages, migrations). Its processes wait for that setup and say so.
+3. **Dependencies.** `docker compose ps` for the services in its
+   `depends_on` (postgres, valkey, s3). Check the env the repo gets with
+   `neptuno env show <repo>`: hosts must be service names such as
+   `postgres`, not `localhost`, because the repo runs in its own container.
+4. **Processes.** Each Procfile line runs as
+   `docker compose exec <repo> sh -c '<command>'` under overmind. Run the
+   failing one by hand to see its error:
+   `docker compose exec -T <repo> sh -c '<command from procfiles/<repo>/Procfile>'`.
+   Then `neptuno restart <repo>:<process>`.
+5. **Proxy.** A 502 from `http://<repo>.localhost` means Caddy reached no
+   one. Check that the `Caddyfile` site for the repo proxies to
+   `<repo>:<port>`, and that the app listens on `0.0.0.0` at that port, not
+   `127.0.0.1`:
+   `docker compose exec -T proxy wget -qO- http://<repo>:<port>/`.
+   After editing the Caddyfile, run
+   `docker compose exec proxy caddy reload --config /etc/caddy/Caddyfile`.
+6. **Image.** After changing `dockerfiles/<repo>/Dockerfile`, rebuild:
+   `docker compose build <repo>` and `neptuno up -d <repo>`.
+7. **Clean slate.** For a fresh database once:
+   `neptuno up -d <repo> --set NEPTUNO_RESET_DB=1` (Rails stacks). Ask before
+   running `docker compose down -v`: it deletes every volume, including
+   databases and installed packages.
+
+Say what you found and what you changed. Don't change files under
+`.neptuno/`, which Neptuno rewrites.

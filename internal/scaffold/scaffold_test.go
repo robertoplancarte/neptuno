@@ -105,18 +105,53 @@ func read(t *testing.T, path string) string {
 	return string(b)
 }
 
-func TestWriteClaudeMDKeepsAnExistingOne(t *testing.T) {
+func TestWriteAgentFiles(t *testing.T) {
 	root := t.TempDir()
-	if wrote, err := WriteClaudeMD(root, "acme"); err != nil || !wrote {
-		t.Fatalf("WriteClaudeMD = %v, %v", wrote, err)
-	}
-	if got := read(t, filepath.Join(root, "CLAUDE.md")); !strings.Contains(got, "# acme\n") || !strings.Contains(got, "neptuno-mcp.json") {
-		t.Errorf("CLAUDE.md =\n%s", got)
-	}
 	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte("mine\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if wrote, err := WriteClaudeMD(root, "acme"); err != nil || wrote {
-		t.Fatalf("WriteClaudeMD over an existing file = %v, %v", wrote, err)
+	wrote, err := WriteAgentFiles(root, "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"AGENTS.md",
+		".claude/skills/neptuno-add-repo/SKILL.md",
+		".claude/skills/neptuno-debug-service/SKILL.md",
+		".claude/skills/neptuno-delegate-to-repo/SKILL.md",
+	}
+	if strings.Join(wrote, ",") != strings.Join(want, ",") {
+		t.Errorf("wrote %q, want %q", wrote, want)
+	}
+	if got := read(t, filepath.Join(root, "CLAUDE.md")); got != "mine\n" {
+		t.Errorf("overwrote CLAUDE.md: %q", got)
+	}
+	if got := read(t, filepath.Join(root, "AGENTS.md")); !strings.HasPrefix(got, "# acme\n") || !strings.Contains(got, "neptuno-mcp.json") {
+		t.Errorf("AGENTS.md =\n%s", got)
+	}
+	for _, path := range want[1:] {
+		skill := read(t, filepath.Join(root, path))
+		name := filepath.Base(filepath.Dir(path))
+		if !strings.HasPrefix(skill, "---\nname: "+name+"\ndescription: ") || strings.Contains(skill, "{{") {
+			t.Errorf("%s has no frontmatter naming it, or an unrendered template:\n%s", path, skill)
+		}
+	}
+	if again, err := WriteAgentFiles(root, "acme"); err != nil || len(again) != 0 {
+		t.Errorf("second run wrote %q, %v", again, err)
+	}
+}
+
+func TestInitWritesAgentFiles(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "acme")
+	if _, err := Init(Options{Name: "acme", Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, filepath.Join(dir, "CLAUDE.md")); got != "@AGENTS.md\n" {
+		t.Errorf("CLAUDE.md = %q", got)
+	}
+	for _, f := range AgentFiles() {
+		if _, err := os.Stat(filepath.Join(dir, f.Path)); err != nil {
+			t.Errorf("%s missing: %v", f.Path, err)
+		}
 	}
 }

@@ -1,0 +1,30 @@
+---
+name: neptuno-delegate-to-repo
+description: Hand a task to Claude Code running inside one repo's container in this Neptuno project, where the repo's tools, env and services are, and use its answer. Use for multi-step work inside a single repo, such as fixing failing tests or building a feature, while you coordinate across repos.
+---
+
+# Hand a task to a repo's Claude in {{.Name}}
+
+Claude inside a repo's container has the repo's language toolchain, its
+env and its services by name, which Claude in the project folder doesn't.
+
+1. Make sure the repo runs: `neptuno status`, else `neptuno up -d <repo>`.
+2. Write the task so it stands alone: the goal, what done looks like
+   (such as "the test suite passes"), the constraints, and what to report
+   back. The other Claude doesn't see this conversation.
+3. Run it and wait for the answer:
+
+   ```sh
+   docker compose exec -T <repo> claude -p "<task>" --mcp-config /root/.claude/neptuno-mcp.json
+   ```
+
+   Add `--output-format json` to get the answer and its session id as
+   JSON, and `--resume <session id>` with a new `-p` to follow up in the
+   same session.
+4. Check the result yourself before reporting it: look at
+   `git -C repos/<repo> diff` and rerun the checks it mentions, such as
+   `docker compose exec -T <repo> bin/rails test`.
+
+Several repos can work at once: run one command per repo in parallel. If
+Claude isn't signed in yet in the containers, a person signs in once with
+`neptuno claude <repo>`, and every repo shares that sign-in.

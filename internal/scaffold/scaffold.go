@@ -10,10 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"text/template"
 )
 
-//go:embed templates/*.tmpl
+//go:embed templates/*.tmpl templates/skills/*/SKILL.md.tmpl
 var templates embed.FS
 
 // Folders are the four convention folders. Each holds one subfolder per repo.
@@ -26,7 +27,6 @@ var files = []struct{ path, template string }{
 	{"neptuno.yml", "neptuno.yml.tmpl"},
 	{".gitignore", "gitignore.tmpl"},
 	{"README.md", "README.md.tmpl"},
-	{"CLAUDE.md", "CLAUDE.md.tmpl"},
 	{"environments/_shared/base.env", "shared_base.env.tmpl"},
 	{"environments/_shared/local.env", "shared_local.env.tmpl"},
 }
@@ -97,6 +97,12 @@ func Init(opts Options) ([]string, error) {
 		created = append(created, f.path)
 	}
 
+	agents, err := WriteAgentFiles(dir, opts.Name)
+	created = append(created, agents...)
+	if err != nil {
+		return created, err
+	}
+
 	// Keep empty convention folders in git.
 	for _, folder := range []string{"dockerfiles", "procfiles", "repos"} {
 		keep := filepath.Join(dir, folder, ".gitkeep")
@@ -108,22 +114,50 @@ func Init(opts Options) ([]string, error) {
 	return created, nil
 }
 
-// WriteClaudeMD writes the project's CLAUDE.md, which tells Claude started
-// in the project folder how the project is laid out and how to work in the
-// repos' containers, unless the project has one. It reports whether it
-// wrote it.
-func WriteClaudeMD(root, name string) (bool, error) {
-	path := filepath.Join(root, "CLAUDE.md")
-	if _, err := os.Stat(path); err == nil {
-		return false, nil
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return false, err
+// AgentFiles maps the files that tell coding agents how to work in the
+// project to their templates: AGENTS.md, which Cursor, Codex and others
+// read, CLAUDE.md, which imports it for Claude Code, and the skills in
+// .claude/skills.
+func AgentFiles() []struct{ Path, Template string } {
+	out := []struct{ Path, Template string }{
+		{"AGENTS.md", "AGENTS.md.tmpl"},
+		{"CLAUDE.md", "CLAUDE.md.tmpl"},
 	}
-	out, err := render("CLAUDE.md.tmpl", struct{ Name string }{name})
-	if err != nil {
-		return false, err
+	skills, _ := fs.Glob(templates, "templates/skills/*/SKILL.md.tmpl")
+	for _, t := range skills {
+		name := filepath.Base(filepath.Dir(t))
+		out = append(out, struct{ Path, Template string }{
+			".claude/skills/" + name + "/SKILL.md", strings.TrimPrefix(t, "templates/"),
+		})
 	}
-	return true, os.WriteFile(path, out, 0o644)
+	return out
+}
+
+// WriteAgentFiles writes each of AgentFiles that the project doesn't have,
+// leaving the ones it has alone, and returns the paths it wrote, relative
+// to root.
+func WriteAgentFiles(root, name string) ([]string, error) {
+	var wrote []string
+	for _, f := range AgentFiles() {
+		path := filepath.Join(root, filepath.FromSlash(f.Path))
+		if _, err := os.Stat(path); err == nil {
+			continue
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return wrote, err
+		}
+		out, err := render(f.Template, struct{ Name string }{name})
+		if err != nil {
+			return wrote, err
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return wrote, err
+		}
+		if err := os.WriteFile(path, out, 0o644); err != nil {
+			return wrote, err
+		}
+		wrote = append(wrote, f.Path)
+	}
+	return wrote, nil
 }
 
 func ensureEmptyDir(dir string) error {

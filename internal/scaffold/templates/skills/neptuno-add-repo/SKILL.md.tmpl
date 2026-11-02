@@ -1,0 +1,55 @@
+---
+name: neptuno-add-repo
+description: Add a repo to this Neptuno project, either an existing git repo or a new app from a stack, and get it running. Use when asked to add, clone, create or set up a new service, app or repo here.
+---
+
+# Add a repo to {{.Name}}
+
+1. Pick a name: lowercase letters, digits, `-` and `_`. It becomes the
+   compose service, the `repos/<name>` folder and `http://<name>.localhost`.
+2. See the stacks and their options:
+
+   ```sh
+   neptuno stacks
+   ```
+
+3. Add it. Pass every choice as a flag, since without a terminal Neptuno
+   can't show its option checklist:
+
+   ```sh
+   neptuno add <name> <git-url> --stack <stack>                      # an existing repo, as a submodule
+   neptuno add <name> --stack <stack> --with <opt> --without <opt>   # a new app from the stack
+   neptuno add <name>                                                # a blank repo
+   ```
+
+   Add `--wildcard` when the app serves one subdomain per tenant, and
+   `--port <port>` when its dev server doesn't listen on the stack's port.
+   `add` never overwrites files, so it is safe to run again after a
+   failure.
+4. Start it and check it:
+
+   ```sh
+   neptuno up -d <name>
+   neptuno status
+   docker compose logs --tail 100 <name>
+   ```
+
+   The first start of a Rails app runs `bundle install` and
+   `db:prepare` in `entrypoint.sh`, which takes a while; follow the logs
+   until its processes run.
+5. Open `http://<name>.localhost` to check it answers. If it doesn't, use
+   the `neptuno-debug-service` skill.
+6. If the app serves an MCP server, declare it in `neptuno.yml`:
+
+   ```yaml
+   repos:
+     <name>:
+       mcp:
+         <server>: /path/to/mcp
+   ```
+
+   then run `neptuno mcp sync` and check it with `neptuno mcp`.
+7. Commit the new files in this project (`compose.yml`, `Caddyfile`,
+   `dockerfiles/<name>`, `procfiles/<name>`, `environments/<name>`,
+   `.gitmodules` and the `repos/<name>` submodule). The app's own code is
+   committed inside `repos/<name>`.
