@@ -28,6 +28,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -168,27 +169,57 @@ func Exec(opts ExecOptions) int {
 		}
 	}
 	if err != nil {
-		fmt.Fprintf(opts.Stderr, "neptuno: could not start the watchdog, so %s may keep running in the container after it is stopped: %v\n", opts.Process, err)
+		fmt.Fprintf(opts.Stderr, "neptuno: could not start %s's watchdog: %v\n", opts.Process, err)
 	}
 
+	// oneShot runs a fresh watchdog with input as its whole stdin, for when
+	// the first one is gone: it forwards the signals input names, then
+	// stops the command's group as the first one would have.
+	watchArgs := watch.Args[1:]
+	oneShot := func(input string) {
+		c := exec.Command(docker, watchArgs...)
+		c.Stdin = strings.NewReader(input)
+		c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		_ = c.Run()
+	}
+	watching := func() bool {
+		if watchDone == nil {
+			return false
+		}
+		select {
+		case <-watchDone:
+			return false
+		default:
+			return true
+		}
+	}
 	var mu sync.Mutex
-	closed := watchDone == nil
+	closed, stopped := false, false
 	send := func(line string) {
 		mu.Lock()
 		defer mu.Unlock()
-		if !closed {
-			if _, err := io.WriteString(pipe, line+"\n"); err != nil {
-				closed = true
+		if !closed && watching() {
+			if _, err := io.WriteString(pipe, line+"\n"); err == nil {
+				return
 			}
 		}
+		go oneShot(line + "\n")
 	}
+	// end tells the watchdog the line has ended, or stops the command
+	// with a fresh one.
 	end := func() {
 		mu.Lock()
 		defer mu.Unlock()
-		if !closed {
+		if closed || stopped {
+			return
+		}
+		if watching() {
 			closed = true
 			pipe.Close()
+			return
 		}
+		stopped = true
+		oneShot("")
 	}
 
 	main := exec.Command(docker, append(append([]string{"compose", "exec"}, env...), opts.Service, "sh", "-c", opts.Script)...)
@@ -214,7 +245,7 @@ func Exec(opts ExecOptions) int {
 				case syscall.SIGQUIT:
 					send("QUIT")
 				case syscall.SIGHUP:
-					end()
+					go end()
 				}
 			}
 		}
@@ -237,4 +268,57 @@ func Exec(opts ExecOptions) int {
 		return exit.ExitCode()
 	}
 	return 1
+}
+
+// ProbeScript finds the process that holds a port or a PID in a container
+// and the run that recorded it. It reads NEPTUNO_PORT, the TCP port a
+// process could not listen on, and NEPTUNO_PID, the PID a server's pid file
+// names, and prints key=value lines: pid, pgid, cmd, and run and proc when
+// the process is recorded under procfile.ProcsDir, or gone=<pid> when the
+// PID is not running. It prints nothing when the port is free.
+const ProbeScript = `pid=$NEPTUNO_PID; ` +
+	`if [ -z "$pid" ] && [ -n "$NEPTUNO_PORT" ]; then hex=$(printf '%04X' "$NEPTUNO_PORT"); ` +
+	`for inode in $(cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | while read -r sl local rem st rest; do [ "$st" = 0A ] || continue; case $local in *:$hex) set -- $rest; echo "$6";; esac; done); do ` +
+	`for d in /proc/[0-9]*; do for fd in "$d"/fd/*; do if [ "$(readlink "$fd" 2>/dev/null)" = "socket:[$inode]" ]; then pid=${d#/proc/}; break 3; fi; done; done; done; fi; ` +
+	`[ -n "$pid" ] || exit 0; ` +
+	`if [ ! -d /proc/$pid ]; then echo "gone=$pid"; exit 0; fi; ` +
+	`s=$(cat /proc/$pid/stat); s=${s##*) }; set -- $s; pgid=$3; ` +
+	`echo "pid=$pid"; echo "pgid=$pgid"; echo "cmd=$(tr '\0' ' ' < /proc/$pid/cmdline | cut -c1-80)"; ` +
+	`for f in ` + procfile.ProcsDir + `/*/*; do [ -f "$f" ] || continue; read -r p st < "$f"; ` +
+	`if [ "$p" = "$pgid" ]; then r=${f%/*}; n=${f##*/}; echo "run=${r##*/}"; echo "proc=${n%.*}"; break; fi; done; exit 0`
+
+// Holder is what ProbeScript found.
+type Holder struct {
+	PID, PGID int
+	Cmd       string
+	// Run and Proc are where the holder is recorded, if it is.
+	Run, Proc string
+	// Gone is true when the PID asked about is not running.
+	Gone bool
+}
+
+// ParseProbe reads ProbeScript's output. ok is false when it found nothing.
+func ParseProbe(out string) (h Holder, ok bool) {
+	for _, line := range strings.Split(out, "\n") {
+		k, v, found := strings.Cut(strings.TrimSpace(line), "=")
+		if !found {
+			continue
+		}
+		switch k {
+		case "pid":
+			h.PID, _ = strconv.Atoi(v)
+		case "pgid":
+			h.PGID, _ = strconv.Atoi(v)
+		case "cmd":
+			h.Cmd = strings.TrimSpace(v)
+		case "run":
+			h.Run = v
+		case "proc":
+			h.Proc = v
+		case "gone":
+			h.PID, _ = strconv.Atoi(v)
+			h.Gone = true
+		}
+	}
+	return h, h.PID > 0
 }

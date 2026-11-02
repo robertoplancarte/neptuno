@@ -1,6 +1,7 @@
 package procs
 
 import (
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,7 +31,11 @@ func fakeDocker(t *testing.T) (docker, shm string) {
 	docker = filepath.Join(dir, "docker")
 	script := `#!/bin/sh
 shift 2
-[ "$1" = -T ] && shift
+if [ "$1" = -T ]; then
+	shift
+	# FAKE_WATCH_DIES makes the first watchdog exit at once.
+	if [ -n "$FAKE_WATCH_DIES" ] && [ ! -e "$FAKE_WATCH_DIES" ]; then : > "$FAKE_WATCH_DIES"; exit 1; fi
+fi
 while [ "$1" = -e ]; do export "$2"; shift 2; done
 shift
 script=$(printf '%s' "$3" | sed "s#/dev/shm/#` + shm + `/#g")
@@ -128,6 +133,33 @@ func TestExecStopsGroupOnHangup(t *testing.T) {
 	}
 }
 
+// TestExecStopsGroupWithoutWatchdog loses the watchdog first, and checks
+// that a hangup still stops the command, through a fresh one.
+func TestExecStopsGroupWithoutWatchdog(t *testing.T) {
+	docker, shm := fakeDocker(t)
+	t.Setenv("FAKE_WATCH_DIES", filepath.Join(t.TempDir(), "died"))
+	done, sigs := execAsync(ExecOptions{
+		Docker: docker, Service: "api", Process: "web", Run: "r1",
+		Script: procfile.ContainerScript("api", `trap '' INT; while :; do sleep 0.1; done`, false),
+	})
+	waitFor(t, "the record", func() bool { return len(records(shm)) == 1 })
+	b, err := os.ReadFile(records(shm)[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, _ := strconv.Atoi(strings.Fields(string(b))[0])
+	time.Sleep(200 * time.Millisecond) // let Exec see the watchdog exit
+	sigs <- syscall.SIGHUP
+	select {
+	case <-done:
+	case <-time.After(8 * time.Second):
+		t.Fatal("Exec did not return after SIGHUP")
+	}
+	if syscall.Kill(-pid, 0) == nil {
+		t.Error("the command's process group survived")
+	}
+}
+
 func TestExecPassesExitStatus(t *testing.T) {
 	docker, shm := fakeDocker(t)
 	code := Exec(ExecOptions{
@@ -189,5 +221,44 @@ func TestSweep(t *testing.T) {
 	}
 	if syscall.Kill(stranger.Process.Pid, 0) != nil {
 		t.Error("the process with a reused PID was stopped")
+	}
+}
+
+// TestProbeFindsPortHolder listens on a port in this process and checks
+// that the probe names it, and that it reports a PID that is not running.
+func TestProbeFindsPortHolder(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the probe reads /proc")
+	}
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	port := l.Addr().(*net.TCPAddr).Port
+
+	probe := func(env ...string) Holder {
+		cmd := exec.Command("sh", "-c", ProbeScript)
+		cmd.Env = append(os.Environ(), env...)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		h, _ := ParseProbe(string(out))
+		return h
+	}
+	if h := probe("NEPTUNO_PORT=" + strconv.Itoa(port)); h.PID != os.Getpid() || h.Cmd == "" || h.Run != "" {
+		t.Errorf("port holder = %+v, want this test, pid %d, unrecorded", h, os.Getpid())
+	}
+	gone := exec.Command("true")
+	if err := gone.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if h := probe("NEPTUNO_PID=" + strconv.Itoa(gone.Process.Pid)); !h.Gone || h.PID != gone.Process.Pid {
+		t.Errorf("exited pid = %+v, want gone", h)
+	}
+	l.Close()
+	if h, ok := ParseProbe(""); ok {
+		t.Errorf("empty probe = %+v, want nothing", h)
 	}
 }
