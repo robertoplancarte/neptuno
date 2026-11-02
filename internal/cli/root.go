@@ -40,6 +40,7 @@ func NewRootCommand() *cobra.Command {
 		newRestartCommand(),
 		newVolumesCommand(),
 		newHostExecCommand(),
+		newContainerExecCommand(),
 		newPaneDiedCommand(),
 	)
 	return root

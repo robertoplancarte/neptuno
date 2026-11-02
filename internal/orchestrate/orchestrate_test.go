@@ -187,7 +187,7 @@ func TestUp(t *testing.T) {
 	}
 
 	procfile := read(t, filepath.Join(root, ".neptuno/procfiles/api/Procfile"))
-	if !strings.Contains(procfile, "web: exec docker compose exec api sh -c 'bin/rails s -b 0.0.0.0'\n") {
+	if !strings.Contains(procfile, "web: exec /bin/neptuno container-exec api web 'bin/rails s -b 0.0.0.0'\n") {
 		t.Errorf("api Procfile not wrapped:\n%s", procfile)
 	}
 	if err := os.MkdirAll(filepath.Join(root, "dockerfiles/api"), 0o755); err != nil {
@@ -199,7 +199,7 @@ func TestUp(t *testing.T) {
 	if _, err := o.writeProcfile("api"); err != nil {
 		t.Fatal(err)
 	}
-	if procfile := read(t, filepath.Join(root, ".neptuno/procfiles/api/Procfile")); !strings.Contains(procfile, "/dev/shm/neptuno-ready") {
+	if procfile := read(t, filepath.Join(root, ".neptuno/procfiles/api/Procfile")); !strings.Contains(procfile, "container-exec --wait-for-entrypoint api web") {
 		t.Errorf("api has an entrypoint.sh but its processes do not wait for it:\n%s", procfile)
 	}
 	if docs := read(t, filepath.Join(root, ".neptuno/procfiles/docs/Procfile")); !strings.Contains(docs, "docs: exec /bin/neptuno host-exec docs 'npm run dev'") {

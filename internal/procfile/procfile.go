@@ -63,11 +63,27 @@ const (
 	SetupLog = "/dev/shm/neptuno-setup.log"
 )
 
-// WrapContainer runs each command inside the compose service with
-// `docker compose exec`. overmind gives each line a TTY, so exec allocates
-// one too and debuggers and REPLs work. With waitForEntrypoint, each command
-// first waits for the entrypoint to write a marker, and stops if it failed.
-func WrapContainer(entries []Entry, service string, waitForEntrypoint bool) []Entry {
+// ProcsDir holds a file per process that a Procfile line runs in a
+// container, at <ProcsDir>/<run>/<process>.<instance>, with the PID and start
+// time of the shell that runs it. That shell is the leader of the process's
+// process group, since docker compose exec starts each command in its own
+// session, so killing the group stops the command and all it started.
+const ProcsDir = "/dev/shm/neptuno-procs"
+
+// StartTimeFunc defines neptuno_start, which prints a process's start time
+// in clock ticks since boot: field 22 of /proc/<pid>/stat, counted after
+// the name in parentheses, which can hold spaces. A PID and its start time
+// name a process exactly, even after the PID is reused.
+const StartTimeFunc = `neptuno_start() { s=$(cat /proc/$1/stat 2>/dev/null) || return 1; s=${s##*) }; set -- $s; echo "${20}"; }; `
+
+// ContainerScript is the shell script `neptuno container-exec` runs in the
+// container for a Procfile command. It first records the shell under
+// ProcsDir, by the NEPTUNO_RUN and NEPTUNO_PROC variables container-exec
+// sets, so the process can be found and stopped later. With
+// waitForEntrypoint it then waits for the entrypoint to write a marker, and
+// stops if it failed.
+func ContainerScript(service, command string, waitForEntrypoint bool) string {
+	record := StartTimeFunc + fmt.Sprintf(`if [ -n "$NEPTUNO_PROC" ] && mkdir -p "%[1]s/$NEPTUNO_RUN"; then echo "$$ $(neptuno_start $$)" > "%[1]s/$NEPTUNO_RUN/$NEPTUNO_PROC"; fi; `, ProcsDir)
 	wait := ""
 	if waitForEntrypoint {
 		done := fmt.Sprintf("[ -e %s ] || [ -e %s ]", ReadyMarker, FailedMarker)
@@ -78,9 +94,23 @@ func WrapContainer(entries []Entry, service string, waitForEntrypoint bool) []En
 			"echo; echo \"Fix it, then run: docker compose restart %[3]s && neptuno restart %[3]s\"; } >&2; exit 1; fi; ",
 			done, FailedMarker, service, SetupLog)
 	}
+	return record + wait + command
+}
+
+// WrapContainer runs each command inside the compose service through
+// `neptuno container-exec`, which runs it with `docker compose exec` and
+// stops it when the Procfile line is stopped or its session goes away.
+// overmind gives each line a TTY, so exec allocates one too and debuggers
+// and REPLs work. With waitForEntrypoint, each command first waits for the
+// entrypoint to write a marker, and stops if it failed.
+func WrapContainer(entries []Entry, neptuno, service string, waitForEntrypoint bool) []Entry {
+	flag := ""
+	if waitForEntrypoint {
+		flag = " --wait-for-entrypoint"
+	}
 	out := make([]Entry, len(entries))
 	for i, e := range entries {
-		out[i] = Entry{e.Name, fmt.Sprintf("exec docker compose exec %s sh -c %s", Quote(service), Quote(wait+e.Command))}
+		out[i] = Entry{e.Name, fmt.Sprintf("exec %s container-exec%s %s %s %s", Quote(neptuno), flag, Quote(service), Quote(e.Name), Quote(e.Command))}
 	}
 	return out
 }

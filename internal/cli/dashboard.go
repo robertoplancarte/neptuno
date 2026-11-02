@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"time"
+
 	"errors"
 	"fmt"
 	"os"
@@ -76,7 +78,7 @@ func dashboardHere(o *orchestrate.Orchestrator) error {
 		Neptuno:       o.Neptuno,
 		Status:        func() []orchestrate.ServiceStatus { return live.get().Status() },
 		Vars:          func(repo string) ([]env.Var, error) { return live.get().EnvVars(repo) },
-		Logs:          func(name string) (string, error) { return live.get().Logs(name) },
+		Logs:          func(name string, since time.Time) (string, error) { return live.get().Logs(name, since) },
 		MCP:           func() orchestrate.MCPSummary { return live.get().MCPSummary() },
 		Volumes:       func() ([]orchestrate.Volume, error) { return live.get().Volumes() },
 		InspectVolume: func(v orchestrate.Volume) (orchestrate.VolumeDetail, error) { return live.get().InspectVolume(v) },
