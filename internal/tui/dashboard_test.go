@@ -8,8 +8,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/robertoplancarte/neptuno/internal/env"
 	"github.com/robertoplancarte/neptuno/internal/orchestrate"
+	"github.com/robertoplancarte/neptuno/internal/proxy"
 )
 
 func dashboardRows() []orchestrate.ServiceStatus {
@@ -211,5 +213,23 @@ func TestDashboardPanels(t *testing.T) {
 	}
 	if !strings.Contains(logsText(m.rows[1], m.opts.Logs), "runs on the host") {
 		t.Error("host repo logs should point at its window")
+	}
+}
+
+func TestDetailsShowsProxyURLs(t *testing.T) {
+	m := newTestDashboard()
+	r := dashboardRows()[0]
+	r.URLs = []proxy.Link{{URL: "http://api.localhost"}, {URL: "http://*.api.localhost", Pattern: true}}
+	got := m.details(r)
+	link := "\x1b]8;;http://api.localhost\x07"
+	if !strings.Contains(got, link) || !strings.Contains(got, "\x1b]8;;\x07") {
+		t.Errorf("details has no OSC 8 link to http://api.localhost:\n%q", got)
+	}
+	if strings.Contains(got, "\x1b]8;;http://*.api.localhost") {
+		t.Errorf("wildcard should not be a link:\n%q", got)
+	}
+	plain := ansi.Strip(got)
+	if !strings.Contains(plain, "URL        http://api.localhost\n") || !strings.Contains(plain, "           http://*.api.localhost\n") {
+		t.Errorf("details =\n%s", plain)
 	}
 }

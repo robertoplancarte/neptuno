@@ -9,9 +9,11 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/robertoplancarte/neptuno/internal/env"
 	"github.com/robertoplancarte/neptuno/internal/orchestrate"
 	"github.com/robertoplancarte/neptuno/internal/procfile"
+	"github.com/robertoplancarte/neptuno/internal/proxy"
 )
 
 // DashboardOptions configures the dashboard.
@@ -80,6 +82,7 @@ var (
 	warnStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	nameStyle  = lipgloss.NewStyle().Bold(true)
 	labelStyle = lipgloss.NewStyle().Faint(true)
+	linkStyle  = lipgloss.NewStyle().Underline(true)
 )
 
 func newDashboard(opts DashboardOptions) *dashboard {
@@ -678,10 +681,27 @@ func (m *dashboard) details(r orchestrate.ServiceStatus) string {
 	if len(r.Ports) > 0 && r.Repo {
 		add("Ports", strings.Join(r.Ports, ", "))
 	}
+	for i, l := range r.URLs {
+		label := ""
+		if i == 0 {
+			label = "URL"
+		}
+		add(label, hyperlink(l))
+	}
 	if len(r.DependsOn) > 0 {
 		add("Depends on", strings.Join(r.DependsOn, ", "))
 	}
 	return strings.Join(lines, "\n") + "\n"
+}
+
+// hyperlink shows a URL as an OSC 8 link, which terminals that support it
+// make clickable and others print as plain text. A wildcard is shown as is,
+// since it names many hosts.
+func hyperlink(l proxy.Link) string {
+	if l.Pattern {
+		return l.URL
+	}
+	return ansi.SetHyperlink(l.URL) + linkStyle.Render(l.URL) + ansi.ResetHyperlink()
 }
 
 func (m *dashboard) formatDate(t time.Time) string {
