@@ -345,7 +345,7 @@ func (m *dashboard) rightLines(height, width int) []string {
 
 func (m *dashboard) keyBar(width int) string {
 	keys := [][2]string{{"enter", "open"}, {"u", "up"}, {"s", "stop"}, {"r", "restart"}, {"e", "env"},
-		{"c", "claude"}, {"m", "mcp"}, {"space", "select"}, {"tab", "panel"}, {"[ ]", "tab"}, {"q", "quit"}}
+		{"c", "claude"}, {"m", "mcp"}, {"space", "select"}, {"← →", "list"}, {"[ ]", "tab"}, {"q", "quit"}}
 	if m.envs != nil {
 		keys = [][2]string{{"↑↓", "choose"}, {"enter", "switch"}, {"esc", "cancel"}}
 	}
@@ -353,7 +353,7 @@ func (m *dashboard) keyBar(width int) string {
 		keys = [][2]string{{"↑↓", "choose"}, {"enter", "do it"}, {"esc", "cancel"}}
 	}
 	if _, ok := m.currentVolume(); ok && m.envs == nil && m.menu == nil {
-		keys = [][2]string{{"enter", "clear volume"}, {"↑↓", "move"}, {"tab", "next list"}, {"f", "refresh"}, {"q", "quit"}}
+		keys = [][2]string{{"enter", "clear volume"}, {"↑↓", "move"}, {"← →", "list"}, {"f", "refresh"}, {"q", "quit"}}
 		if m.confirm != "" {
 			keys = [][2]string{{"y", "delete it"}, {"any other key", "cancels"}}
 		}

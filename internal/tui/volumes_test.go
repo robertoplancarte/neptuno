@@ -138,3 +138,36 @@ func TestDescribeVolume(t *testing.T) {
 		}
 	}
 }
+
+func TestArrowsMoveBetweenListsAndBracketsBetweenTabs(t *testing.T) {
+	m := newVolumesDashboard(t)
+	key(m, "right")
+	if r, ok := m.current(); !ok || r.Name != "postgres" || m.tab != tabInfo {
+		t.Fatalf("right went to cursor %d, tab %d; want postgres on Info", m.cursor, m.tab)
+	}
+	key(m, "right")
+	if v, ok := m.currentVolume(); !ok || v.Name != "api_bundle" {
+		t.Fatalf("right from the services did not reach the volumes: cursor %d", m.cursor)
+	}
+	key(m, "right")
+	if r, ok := m.current(); !ok || r.Name != "api" {
+		t.Errorf("right from the volumes did not wrap to the repos: cursor %d", m.cursor)
+	}
+	key(m, "left")
+	if _, ok := m.currentVolume(); !ok {
+		t.Errorf("left from the repos did not wrap to the volumes: cursor %d", m.cursor)
+	}
+	key(m, "left", "left")
+	if r, ok := m.current(); !ok || r.Name != "api" || m.tab != tabInfo {
+		t.Errorf("left left went to cursor %d, tab %d", m.cursor, m.tab)
+	}
+
+	key(m, "]")
+	if m.tab != tabEnv || m.cursor != 0 {
+		t.Errorf("] went to tab %d, cursor %d; want Env on api", m.tab, m.cursor)
+	}
+	key(m, "[", "[")
+	if m.tab != tabLogs {
+		t.Errorf("[ [ went to tab %d, want Logs", m.tab)
+	}
+}
