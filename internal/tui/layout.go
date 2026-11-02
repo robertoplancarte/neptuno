@@ -244,6 +244,11 @@ func (m *dashboard) rightLines(height, width int) []string {
 		text = m.details(r)
 	case m.panel.key != m.panelKey():
 		text = labelStyle.Render("Loading…")
+		if m.tab == tabLogs {
+			text = m.logsPanel(r.Name, text)
+		}
+	case m.tab == tabLogs:
+		text = m.logsPanel(r.Name, m.panel.text)
 	default:
 		text = m.panel.text
 	}
