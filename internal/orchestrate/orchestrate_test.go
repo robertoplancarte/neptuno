@@ -166,7 +166,7 @@ func TestUp(t *testing.T) {
 	}
 	want := []string{
 		"docker compose up --detach postgres api valkey web",
-		"tmux new-session -d -s neptuno-acme -n neptuno -c ROOT /bin/neptuno",
+		"tmux new-session -d -s neptuno-acme -n neptuno -c ROOT /bin/neptuno dashboard",
 		"overmind start --daemonize --any-can-die -f ROOT/.neptuno/procfiles/api/Procfile -d ROOT -s .neptuno/run/api.sock -w acme-api -F .neptuno/run/api.tmux.conf",
 		"tmux new-window -d -t =neptuno-acme: -n api -c ROOT " + o.connectCommand("api"),
 		"overmind start --daemonize --any-can-die -f ROOT/.neptuno/procfiles/docs/Procfile -d ROOT -s .neptuno/run/docs.sock -w acme-docs -F .neptuno/run/docs.tmux.conf",
@@ -230,7 +230,7 @@ func TestUpSkipsRunningWindowsAndSwitchesInsideTmux(t *testing.T) {
 	}
 	want := []string{
 		"docker compose up --detach postgres api",
-		"tmux new-window -d -b -t =neptuno-acme:^ -n neptuno -c " + o.Project.Root + " /bin/neptuno",
+		"tmux new-window -d -b -t =neptuno-acme:^ -n neptuno -c " + o.Project.Root + " /bin/neptuno dashboard",
 		"tmux switch-client -t =neptuno-acme",
 	}
 	if !reflect.DeepEqual(f.cmds, want) {
@@ -338,7 +338,7 @@ func TestClaudeInRunningContainer(t *testing.T) {
 		got = append(got, strings.ReplaceAll(c, o.Project.Root, "ROOT"))
 	}
 	want := []string{
-		"tmux new-session -d -s neptuno-acme -n neptuno -c ROOT /bin/neptuno",
+		"tmux new-session -d -s neptuno-acme -n neptuno -c ROOT /bin/neptuno dashboard",
 		"tmux new-window -d -t =neptuno-acme: -n claude-api -c ROOT docker compose exec api claude --continue; " +
 			`status=$?; if [ $status -ne 0 ]; then echo; echo "claude exited with status $status. Press enter to close this window."; read _; fi`,
 		"tmux select-window -t =neptuno-acme:claude-api",
@@ -529,5 +529,57 @@ func TestClaudeOpensATabInTheReposWindow(t *testing.T) {
 	}
 	if len(f.cmds) != 1 || f.cmds[0] != "tmux -S /tmp/om select-window -t :claude" {
 		t.Errorf("with the tab open, ran:\n%s", strings.Join(f.cmds, "\n"))
+	}
+}
+
+func TestOpenDashboardCreatesSessionAndAttaches(t *testing.T) {
+	t.Setenv("TMUX", "")
+	o, f := setup(t)
+
+	if err := o.OpenDashboard(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"tmux new-session -d -s neptuno-acme -n neptuno -c " + o.Project.Root + " /bin/neptuno dashboard",
+		"tmux select-window -t =neptuno-acme:neptuno",
+		"attach: tmux attach-session -t =neptuno-acme",
+	}
+	if !reflect.DeepEqual(f.cmds, want) {
+		t.Errorf("commands:\n%s\nwant:\n%s", strings.Join(f.cmds, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestOpenDashboardAttachesToRunningDashboard(t *testing.T) {
+	t.Setenv("TMUX", "")
+	o, f := setup(t)
+	f.sessions, f.windows[DashboardWindow], f.windows["api"] = true, true, true
+
+	if err := o.OpenDashboard(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"tmux select-window -t =neptuno-acme:neptuno",
+		"attach: tmux attach-session -t =neptuno-acme",
+	}
+	if !reflect.DeepEqual(f.cmds, want) {
+		t.Errorf("commands:\n%s\nwant:\n%s", strings.Join(f.cmds, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestOpenDashboardReopensClosedDashboardInsideTmux(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-0/default,1,0")
+	o, f := setup(t)
+	f.sessions, f.windows["api"] = true, true
+
+	if err := o.OpenDashboard(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"tmux new-window -d -b -t =neptuno-acme:^ -n neptuno -c " + o.Project.Root + " /bin/neptuno dashboard",
+		"tmux select-window -t =neptuno-acme:neptuno",
+		"tmux switch-client -t =neptuno-acme",
+	}
+	if !reflect.DeepEqual(f.cmds, want) {
+		t.Errorf("commands:\n%s\nwant:\n%s", strings.Join(f.cmds, "\n"), strings.Join(want, "\n"))
 	}
 }
