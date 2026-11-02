@@ -164,6 +164,9 @@ func (m *dashboard) projectLines() []string {
 	if l := m.mcpLine(); l != "" {
 		lines = append(lines, l)
 	}
+	if n := len(m.volumes); n > 0 {
+		lines = append(lines, labelStyle.Render(fmt.Sprintf("%d volumes (v to manage)", n)))
+	}
 	return lines
 }
 
@@ -263,6 +266,8 @@ func (m *dashboard) rightLines(height, width int) []string {
 		text = m.envView()
 	case m.menu != nil:
 		text = m.menuView()
+	case m.vols != nil:
+		text = m.volumeView()
 	case !ok:
 		text = "compose.yml has no services yet; add a repo with `neptuno add`."
 	case m.tab == tabInfo:
@@ -279,7 +284,7 @@ func (m *dashboard) rightLines(height, width int) []string {
 	}
 	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
 	// Logs follow the end, like tail -f, unless scrolled up.
-	if m.tab == tabLogs && m.envs == nil && m.menu == nil {
+	if m.tab == tabLogs && m.envs == nil && m.menu == nil && m.vols == nil {
 		end := max(0, len(lines)-height-m.scroll)
 		m.scroll = min(m.scroll, max(0, len(lines)-height))
 		lines = lines[end:]
@@ -298,12 +303,18 @@ func (m *dashboard) rightLines(height, width int) []string {
 
 func (m *dashboard) keyBar(width int) string {
 	keys := [][2]string{{"enter", "open"}, {"u", "up"}, {"s", "stop"}, {"r", "restart"}, {"e", "env"},
-		{"c", "claude"}, {"m", "mcp"}, {"space", "select"}, {"tab", "panel"}, {"[ ]", "tab"}, {"q", "quit"}}
+		{"c", "claude"}, {"m", "mcp"}, {"v", "volumes"}, {"space", "select"}, {"tab", "panel"}, {"[ ]", "tab"}, {"q", "quit"}}
 	if m.envs != nil {
 		keys = [][2]string{{"↑↓", "choose"}, {"enter", "switch"}, {"esc", "cancel"}}
 	}
 	if m.menu != nil {
 		keys = [][2]string{{"↑↓", "choose"}, {"enter", "do it"}, {"esc", "cancel"}}
+	}
+	if m.vols != nil {
+		keys = [][2]string{{"↑↓", "choose"}, {"enter", "reset"}, {"f", "reload"}, {"esc", "close"}}
+		if m.vols.confirm {
+			keys = [][2]string{{"y", "delete it"}, {"any other key", "cancel"}}
+		}
 	}
 	var parts []string
 	for _, k := range keys {

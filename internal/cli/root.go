@@ -38,6 +38,7 @@ func NewRootCommand() *cobra.Command {
 		newMCPCommand(),
 		newEnvCommand(),
 		newRestartCommand(),
+		newVolumesCommand(),
 		newHostExecCommand(),
 		newPaneDiedCommand(),
 	)

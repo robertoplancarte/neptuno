@@ -94,8 +94,9 @@ The `rails` stack keeps installed gems in a `<repo>_bundle` named volume at
 `compose.yml`. They survive rebuilt and recreated containers, so the Rails
 entrypoint's `bundle check || bundle install` only installs when
 `Gemfile.lock` changes. Named volumes live inside Docker's VM, so they run at
-native speed on a Mac. `docker compose down -v` removes them for a clean
-install.
+native speed on a Mac. To start one over, say for a clean `bundle install`,
+press `v` in the dashboard or run `neptuno volumes reset <repo>_bundle` (see
+[Volumes](#volumes)).
 
 ### Stack options
 
@@ -245,6 +246,7 @@ falls back to a plain list.
 | `e` | switch a repo's env, then restart it if it is running |
 | `c` | open Claude Code in a repo's container |
 | `m` | copy a repo's MCP URLs, or add its servers to Claude Code |
+| `v` | list the project's volumes and reset one |
 | `q` | quit |
 
 A repo's envs are the `<name>.env` files in `environments/_shared` and
@@ -259,6 +261,24 @@ right panel switches to when that includes the row under the cursor: below
 the container's output while it runs or after it fails, above it once it
 succeeds. The bottom line says when it is done or failed, and a service
 takes one command at a time.
+
+### Volumes
+
+`v` lists the named volumes in `compose.yml` (as `docker compose config`
+resolves them), the services that mount each and whether docker has created
+it yet; the Info tab names the ones the row under the cursor mounts. `enter`
+resets the one under the cursor after you confirm with `y`, since its data
+is gone for good: Neptuno stops the services that mount it and removes their
+containers, which hold on to it, deletes it, then starts again the ones that
+were running, which recreates it empty. Resetting `postgres_data` gives
+postgres a new, empty database, and a Rails app's `<repo>_bundle` volume
+gets its gems reinstalled by the entrypoint. The reset runs in the
+background like `u`, and its output goes to the Logs tab of those services
+and under the list. External volumes are left alone.
+
+From the shell, `neptuno volumes` prints the same list and
+`neptuno volumes reset <volume>...` does the same reset, asking first unless
+you pass `--yes`.
 
 `neptuno up` makes the dashboard the first window of the session too, so
 attaching lands on it. Quitting it closes that window, and the next `neptuno`
