@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"time"
+
 	"errors"
 	"fmt"
 	"os"
@@ -55,7 +57,8 @@ func newDashboardCommand() *cobra.Command {
 				return err
 			}
 			if !isTerminal() {
-				fmt.Fprint(cmd.OutOrStdout(), tui.RenderStatus(o.Status()))
+				rows := o.Status()
+				fmt.Fprint(cmd.OutOrStdout(), tui.RenderStatus(rows)+tui.StatusWarnings(rows, o.HostWarnings()))
 				return nil
 			}
 			return dashboardHere(o)
@@ -76,11 +79,12 @@ func dashboardHere(o *orchestrate.Orchestrator) error {
 		Neptuno:       o.Neptuno,
 		Status:        func() []orchestrate.ServiceStatus { return live.get().Status() },
 		Vars:          func(repo string) ([]env.Var, error) { return live.get().EnvVars(repo) },
-		Logs:          func(name string) (string, error) { return live.get().Logs(name) },
+		Logs:          func(name string, since time.Time) (string, error) { return live.get().Logs(name, since) },
 		MCP:           func() orchestrate.MCPSummary { return live.get().MCPSummary() },
 		Volumes:       func() ([]orchestrate.Volume, error) { return live.get().Volumes() },
 		InspectVolume: func(v orchestrate.Volume) (orchestrate.VolumeDetail, error) { return live.get().InspectVolume(v) },
 		Stacks:        func() ([]*stacks.Stack, error) { return stacks.List(o.Project.Path("stacks")) },
+		HostWarnings:  func() []string { return live.get().HostWarnings() },
 	})
 }
 
@@ -127,7 +131,8 @@ func newStatusCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprint(cmd.OutOrStdout(), tui.RenderStatus(o.Status()))
+			rows := o.Status()
+			fmt.Fprint(cmd.OutOrStdout(), tui.RenderStatus(rows)+tui.StatusWarnings(rows, o.HostWarnings()))
 			return nil
 		},
 	}

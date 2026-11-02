@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -24,10 +25,38 @@ func TestParse(t *testing.T) {
 }
 
 func TestWrapContainer(t *testing.T) {
-	got := WrapContainer([]Entry{{"web", "echo 'hi' && rails s"}}, "api", false)
-	want := `exec docker compose exec api sh -c 'echo '\''hi'\'' && rails s'`
+	got := WrapContainer([]Entry{{"web", "echo 'hi' && rails s"}}, "/usr/local/bin/neptuno", "api", false)
+	want := `exec /usr/local/bin/neptuno container-exec api web 'echo '\''hi'\'' && rails s'`
 	if got[0].Command != want {
 		t.Errorf("WrapContainer = %s\nwant %s", got[0].Command, want)
+	}
+	got = WrapContainer([]Entry{{"web", "rails s"}}, "/usr/local/bin/neptuno", "api", true)
+	want = `exec /usr/local/bin/neptuno container-exec --wait-for-entrypoint api web 'rails s'`
+	if got[0].Command != want {
+		t.Errorf("WrapContainer = %s\nwant %s", got[0].Command, want)
+	}
+}
+
+// TestContainerScriptRecordsItself runs the script with sh, with a scratch
+// folder standing in for the container's /dev/shm, and checks that it
+// records its PID and start time under its run before the command runs.
+func TestContainerScriptRecordsItself(t *testing.T) {
+	dir := t.TempDir()
+	script := strings.ReplaceAll(ContainerScript("api", `cat "$REC"`, false), "/dev/shm/", dir+"/")
+	cmd := exec.Command("sh", "-c", script)
+	cmd.Env = append(os.Environ(), "NEPTUNO_RUN=r1", "NEPTUNO_PROC=web.ab12", "REC="+dir+"/neptuno-procs/r1/web.ab12")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := strings.Fields(string(out))
+	if len(f) != 2 || f[0] != strconv.Itoa(cmd.Process.Pid) || f[1] == "" {
+		t.Errorf("record = %q, want the shell's PID %d and a start time", out, cmd.Process.Pid)
+	}
+	if len(f) == 2 {
+		if _, err := strconv.Atoi(f[1]); err != nil {
+			t.Errorf("start time %q is not a number", f[1])
+		}
 	}
 }
 
@@ -35,12 +64,8 @@ func TestWrapContainer(t *testing.T) {
 // sh, with a scratch folder standing in for the container's /dev/shm.
 func TestWrapContainerWaitsForEntrypoint(t *testing.T) {
 	dir := t.TempDir()
-	cmd := WrapContainer([]Entry{{"web", "echo started"}}, "api", true)[0].Command
-	inner, err := exec.Command("sh", "-c", "printf %s "+strings.TrimPrefix(cmd, "exec docker compose exec api sh -c ")).Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	script := strings.ReplaceAll(string(inner), "/dev/shm/", dir+"/")
+	inner := ContainerScript("api", "echo started", true)
+	script := strings.ReplaceAll(inner, "/dev/shm/", dir+"/")
 
 	go func() {
 		time.Sleep(1500 * time.Millisecond)

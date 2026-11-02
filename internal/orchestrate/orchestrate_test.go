@@ -30,6 +30,12 @@ type fakeRunner struct {
 	overmindWindows string
 	// missing holds programs LookPath does not find.
 	missing map[string]bool
+	// execs records docker compose exec commands, without their script.
+	execs []string
+	// execOut is what docker compose exec prints.
+	execOut string
+	// ps is what ps prints.
+	ps string
 }
 
 func (f *fakeRunner) Run(dir, name string, args ...string) error {
@@ -62,6 +68,10 @@ func (f *fakeRunner) Check(dir, name string, args ...string) bool {
 			return ok
 		}
 	}
+	if name == "kill" {
+		f.cmds = append(f.cmds, name+" "+strings.Join(args, " "))
+		return true
+	}
 	if name != "tmux" {
 		return true
 	}
@@ -91,6 +101,13 @@ func (f *fakeRunner) Output(dir, name string, args ...string) (string, error) {
 	}
 	if name == "tmux" && slices.Contains(args, "list-windows") {
 		return f.overmindWindows, nil
+	}
+	if name == "ps" {
+		return f.ps, nil
+	}
+	if name == "docker" && len(args) > 1 && args[1] == "exec" {
+		f.execs = append(f.execs, name+" "+strings.Join(args[:len(args)-1], " "))
+		return f.execOut, nil
 	}
 	svc := args[len(args)-1]
 	ids := f.containers[svc]
@@ -187,7 +204,7 @@ func TestUp(t *testing.T) {
 	}
 
 	procfile := read(t, filepath.Join(root, ".neptuno/procfiles/api/Procfile"))
-	if !strings.Contains(procfile, "web: exec docker compose exec api sh -c 'bin/rails s -b 0.0.0.0'\n") {
+	if !strings.Contains(procfile, "web: exec /bin/neptuno container-exec api web 'bin/rails s -b 0.0.0.0'\n") {
 		t.Errorf("api Procfile not wrapped:\n%s", procfile)
 	}
 	if err := os.MkdirAll(filepath.Join(root, "dockerfiles/api"), 0o755); err != nil {
@@ -199,7 +216,7 @@ func TestUp(t *testing.T) {
 	if _, err := o.writeProcfile("api"); err != nil {
 		t.Fatal(err)
 	}
-	if procfile := read(t, filepath.Join(root, ".neptuno/procfiles/api/Procfile")); !strings.Contains(procfile, "/dev/shm/neptuno-ready") {
+	if procfile := read(t, filepath.Join(root, ".neptuno/procfiles/api/Procfile")); !strings.Contains(procfile, "container-exec --wait-for-entrypoint api web") {
 		t.Errorf("api has an entrypoint.sh but its processes do not wait for it:\n%s", procfile)
 	}
 	if docs := read(t, filepath.Join(root, ".neptuno/procfiles/docs/Procfile")); !strings.Contains(docs, "docs: exec /bin/neptuno host-exec docs 'npm run dev'") {
@@ -425,6 +442,56 @@ func TestUpWritesTmuxConfigWithPaneDiedHook(t *testing.T) {
 		!strings.Contains(conf, `run-shell "echo '#{socket_path}' > `) ||
 		!strings.Contains(conf, `set-hook -g pane-died "run-shell \"/bin/neptuno pane-died api '#{socket_path}' '#{pane_id}'`) {
 		t.Errorf("tmux config:\n%s", conf)
+	}
+}
+
+// TestUpSweepsEarlierRuns checks that a new overmind gets a fresh run ID,
+// in its tmux config, and that the container is swept of every other run's
+// processes first; and that up and restart, with overmind running, sweep
+// for the run they find.
+func TestUpSweepsEarlierRuns(t *testing.T) {
+	t.Setenv("TMUX", "")
+	o, f := setup(t)
+	var log strings.Builder
+	o.Log = &log
+	f.execOut = "web\nweb\nworker\n"
+	if err := o.Up(UpOptions{Selected: []string{"api", "docs"}, Detach: true}); err != nil {
+		t.Fatal(err)
+	}
+	run := o.currentRun("api")
+	if run == "" {
+		t.Fatal("no run recorded for api")
+	}
+	if o.currentRun("docs") == "" {
+		t.Error("no run recorded for docs")
+	}
+	conf := read(t, filepath.Join(o.Project.Root, ".neptuno/run/api.tmux.conf"))
+	if !strings.Contains(conf, "set-environment -g NEPTUNO_RUN "+run+"\n") {
+		t.Errorf("tmux config does not set the run %s:\n%s", run, conf)
+	}
+	want := []string{"docker compose exec -T -e NEPTUNO_RUN=" + run + " api sh -c"}
+	if !reflect.DeepEqual(f.execs, want) {
+		t.Errorf("execs = %q, want %q (host repos are not swept)", f.execs, want)
+	}
+	if !strings.Contains(log.String(), "Stopped web, worker in api's container, left running by an earlier run") {
+		t.Errorf("log:\n%s", log.String())
+	}
+
+	// overmind is running now: up reconnects and sweeps for its run.
+	f.execs = nil
+	if err := o.Up(UpOptions{Selected: []string{"api"}, Detach: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(f.execs, want) || o.currentRun("api") != run {
+		t.Errorf("second up: execs = %q, run %s, want %q, %s", f.execs, o.currentRun("api"), want, run)
+	}
+
+	f.execs = nil
+	if err := o.Restart("api", ""); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(f.execs, want) {
+		t.Errorf("restart: execs = %q, want %q", f.execs, want)
 	}
 }
 

@@ -51,11 +51,15 @@ type DashboardOptions struct {
 	Exec func(name string, args ...string) (string, error)
 	// Stacks lists the stacks the add-repo form offers.
 	Stacks func() ([]*stacks.Stack, error)
+	// HostWarnings reports overmind daemons on the host that should not be
+	// running, for the project panel. It runs off the UI goroutine.
+	HostWarnings func() []string
 }
 
 type (
 	statusMsg []orchestrate.ServiceStatus
 	mcpMsg    orchestrate.MCPSummary
+	hostMsg   []string
 	tickMsg   struct{}
 	doneMsg   struct {
 		action string
@@ -87,8 +91,10 @@ type dashboard struct {
 	// menu is the open MCP menu, or nil.
 	menu *mcpMenu
 	// mcp is the project's MCP setup, once loaded.
-	mcp    *orchestrate.MCPSummary
-	lastIn map[int]int
+	mcp *orchestrate.MCPSummary
+	// hostWarnings are the project's stray overmind daemons.
+	hostWarnings []string
+	lastIn       map[int]int
 	// actions holds each service's last background action, and nextAction
 	// numbers them.
 	actions    map[string]*action
@@ -158,6 +164,9 @@ func (m *dashboard) refresh() tea.Cmd {
 	if summary := m.opts.MCP; summary != nil {
 		cmds = append(cmds, func() tea.Msg { return mcpMsg(summary()) })
 	}
+	if host := m.opts.HostWarnings; host != nil {
+		cmds = append(cmds, func() tea.Msg { return hostMsg(host()) })
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -183,6 +192,9 @@ func (m *dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if first {
 			return m, tea.Batch(m.tick(), m.fetchPanel())
 		}
+		return m, nil
+	case hostMsg:
+		m.hostWarnings = msg
 		return m, nil
 	case mcpMsg:
 		sum := orchestrate.MCPSummary(msg)
@@ -506,6 +518,9 @@ func (m *dashboard) compactView() string {
 		return b.String()
 	}
 	b.WriteString(m.table())
+	for _, w := range m.hostWarnings {
+		b.WriteString(warningLine(w) + "\n")
+	}
 	if m.form != nil {
 		b.WriteString("\n" + m.formView() + "\n")
 	} else if m.envs != nil {
@@ -817,6 +832,9 @@ func (m *dashboard) details(r orchestrate.ServiceStatus) string {
 			}
 			add("Processes", strings.Join(ps, " · "))
 		}
+		for _, w := range r.Warnings {
+			lines = append(lines, warningLine(w))
+		}
 		var win []string
 		if r.Window {
 			win = append(win, r.Name+" (enter)")
@@ -869,6 +887,46 @@ func (m *dashboard) details(r orchestrate.ServiceStatus) string {
 		add("Volumes", strings.Join(vols, ", ")+labelStyle.Render("  (in the Volumes list)"))
 	}
 	return strings.Join(lines, "\n") + "\n"
+}
+
+// warningMark starts a warning line, which the panel wraps rather than
+// truncates.
+const warningMark = "⚠ "
+
+func warningLine(w string) string {
+	return warnStyle.Render(warningMark + w)
+}
+
+// wrapWarnings wraps the warning lines in lines to width.
+func wrapWarnings(lines []string, width int) []string {
+	var out []string
+	for _, l := range lines {
+		if width > 10 && strings.Contains(l, warningMark) {
+			out = append(out, strings.Split(ansi.Wrap(l, width, ""), "\n")...)
+			continue
+		}
+		out = append(out, l)
+	}
+	return out
+}
+
+// StatusWarnings lists what `neptuno status` warns about below the
+// tables: each repo's stopped processes that could not start, and the
+// project's stray overmind daemons.
+func StatusWarnings(rows []orchestrate.ServiceStatus, host []string) string {
+	var b strings.Builder
+	for _, r := range rows {
+		for _, w := range r.Warnings {
+			b.WriteString(warningLine(r.Name+": "+w) + "\n")
+		}
+	}
+	for _, w := range host {
+		b.WriteString(warningLine(w) + "\n")
+	}
+	if b.Len() == 0 {
+		return ""
+	}
+	return "\n" + b.String()
 }
 
 // healthLabel says whether an MCP server answered the last check.

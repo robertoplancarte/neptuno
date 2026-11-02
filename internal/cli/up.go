@@ -178,12 +178,14 @@ func newRestartCommand() *cobra.Command {
 
 // newPaneDiedCommand backs the pane-died hook in overmind's tmux config: it
 // replaces the dead pane of a process that exited with a shell on the host,
-// and closes the pane once that shell exits.
+// and closes the pane once that shell exits. Given the project root, it
+// first saves why the process exited when its port or pid file was taken,
+// for `neptuno status` to explain.
 func newPaneDiedCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:    "pane-died <repo> <tmux-socket> <pane> <process> <status>",
+		Use:    "pane-died <repo> <tmux-socket> <pane> <process> <status> [root]",
 		Hidden: true,
-		Args:   cobra.ExactArgs(5),
+		Args:   cobra.RangeArgs(5, 6),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repo, socket, pane, process, status := args[0], args[1], args[2], args[3], args[4]
 			tmux := func(args ...string) *exec.Cmd {
@@ -193,6 +195,13 @@ func newPaneDiedCommand() *cobra.Command {
 			// its pane. overmind's restart reopens a process's window.
 			if out, _ := tmux("display-message", "-p", "-t", pane, "#{pane_start_command}").Output(); orchestrate.ClosesOnExit(string(out)) {
 				return tmux("kill-pane", "-t", pane).Run()
+			}
+			if len(args) == 6 {
+				if out, err := tmux("capture-pane", "-p", "-J", "-S", "-200", "-t", pane).Output(); err == nil {
+					if err := orchestrate.RecordExit(args[5], repo, process, string(out)); err != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "neptuno: %v\n", err)
+					}
+				}
 			}
 			return tmux("respawn-pane", "-k", "-t", pane, orchestrate.DeadPaneCommand(repo, process, status)).Run()
 		},

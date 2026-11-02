@@ -326,3 +326,30 @@ func TestProjectPanelMCPLine(t *testing.T) {
 		t.Errorf("MCP line = %q", got)
 	}
 }
+
+func TestWarningsShowAndWrap(t *testing.T) {
+	m := newTestDashboard()
+	r := dashboardRows()[0]
+	r.Warnings = []string{"web could not start: port 3000 is held by pid 88 (puma), left by an earlier run; neptuno restart api stops it"}
+	if plain := ansi.Strip(m.details(r)); !strings.Contains(plain, "⚠ web could not start: port 3000 is held by pid 88") {
+		t.Errorf("details has no warning:\n%s", plain)
+	}
+	lines := wrapWarnings(strings.Split(m.details(r), "\n"), 40)
+	for _, l := range lines {
+		if ansi.StringWidth(l) > 40 && strings.Contains(l, "port 3000") {
+			t.Errorf("warning line not wrapped: %q", ansi.Strip(l))
+		}
+	}
+	got := ansi.Strip(StatusWarnings([]orchestrate.ServiceStatus{r}, []string{"overmind for shop (pid 9) is still running"}))
+	if got != "\n⚠ "+r.Name+": "+r.Warnings[0]+"\n⚠ overmind for shop (pid 9) is still running\n" {
+		t.Errorf("StatusWarnings = %q", got)
+	}
+	if StatusWarnings([]orchestrate.ServiceStatus{dashboardRows()[0]}, nil) != "" {
+		t.Error("StatusWarnings printed something with nothing to warn about")
+	}
+
+	m.Update(hostMsg{"overmind for shop (pid 9) is still running"})
+	if lines := m.projectLines(); !strings.Contains(ansi.Strip(lines[len(lines)-1]), "overmind for shop") {
+		t.Errorf("project panel: %q", lines)
+	}
+}

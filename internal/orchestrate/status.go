@@ -59,6 +59,9 @@ type ServiceStatus struct {
 	DependsOn []string
 	// Git describes the repo's checkout, or is nil when it has none.
 	Git *GitStatus
+	// Warnings explain stopped processes that could not start because
+	// their port or server pid file was taken, and by what.
+	Warnings []string
 }
 
 // ProcessStatus is one line of `overmind status`.
@@ -155,6 +158,9 @@ func (o *Orchestrator) Status() []ServiceStatus {
 			}
 			if procs, err := o.Runner.Output(p.Root, "overmind", "status", "-s", socket(name)); err == nil {
 				s.Overmind, s.Processes = true, parseOvermindStatus(procs)
+			}
+			if s.Overmind {
+				s.Warnings = o.exitWarnings(s)
 			}
 			s.Git = o.gitStatus(p.Path("repos", name))
 		}
