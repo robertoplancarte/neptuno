@@ -190,7 +190,7 @@ func (m *dashboard) handleAction(msg actionMsg) tea.Cmd {
 	} else {
 		m.message = name + " done"
 	}
-	return m.refresh()
+	return tea.Batch(m.refresh(), m.loadVolumes())
 }
 
 // actionText is a service's last action and its output, for the Logs tab.

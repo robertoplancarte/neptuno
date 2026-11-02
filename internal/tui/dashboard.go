@@ -36,6 +36,9 @@ type DashboardOptions struct {
 	// MCP reports how far the project's MCP servers are set up, for the
 	// project panel. It runs off the UI goroutine.
 	MCP func() orchestrate.MCPSummary
+	// Volumes lists the project's named volumes, for the volumes view. It
+	// runs off the UI goroutine.
+	Volumes func() ([]orchestrate.Volume, error)
 	// Copy puts text on the clipboard. Nil uses tmux's buffer inside tmux,
 	// else pbcopy, wl-copy or xclip, else an OSC 52 escape.
 	Copy func(text string) error
@@ -84,6 +87,12 @@ type dashboard struct {
 	// numbers them.
 	actions    map[string]*action
 	nextAction int
+	// volumes are the project's named volumes once loaded, and vols the
+	// open volumes view, or nil.
+	volumes       []orchestrate.Volume
+	volumesErr    error
+	volumesLoaded bool
+	vols          *volumeView
 }
 
 // envChooser picks the configuration a repo runs with.
@@ -120,7 +129,7 @@ func RenderStatus(rows []orchestrate.ServiceStatus) string {
 	return d.table()
 }
 
-func (m *dashboard) Init() tea.Cmd { return m.refresh() }
+func (m *dashboard) Init() tea.Cmd { return tea.Batch(m.refresh(), m.loadVolumes()) }
 
 func (m *dashboard) refresh() tea.Cmd {
 	if m.loading || m.opts.Status == nil {
@@ -163,6 +172,12 @@ func (m *dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case panelMsg:
 		if msg.key == m.panelKey() {
 			m.panel = msg
+		}
+		return m, nil
+	case volumesMsg:
+		m.volumes, m.volumesErr, m.volumesLoaded = msg.list, msg.err, true
+		if m.vols != nil && m.vols.cursor >= len(m.volumes) {
+			m.vols.cursor = max(0, len(m.volumes)-1)
 		}
 		return m, nil
 	case actionMsg:
@@ -223,8 +238,24 @@ func (m *dashboard) key(key string) (tea.Model, tea.Cmd) {
 	if m.menu != nil {
 		return m, m.menuKey(key)
 	}
+	if m.vols != nil {
+		return m, m.volumeKey(key)
+	}
 	row, ok := m.current()
 	switch key {
+	case "v":
+		m.vols = &volumeView{}
+		// Start on the volume of the row under the cursor, if it has one.
+		if ok {
+			if names := m.volumesFor(row.Name); len(names) > 0 {
+				for i, v := range m.volumes {
+					if v.Name == names[0] {
+						m.vols.cursor = i
+					}
+				}
+			}
+		}
+		return m, m.loadVolumes()
 	case "m":
 		switch {
 		case !ok:
@@ -439,15 +470,23 @@ func (m *dashboard) compactView() string {
 	b.WriteString(m.table())
 	if m.envs != nil {
 		b.WriteString("\n" + m.envView())
+	} else if m.vols != nil {
+		b.WriteString("\n" + m.volumeView())
 	} else if r, ok := m.current(); ok {
 		b.WriteString("\n" + m.details(r))
 	}
 	if m.message != "" {
 		b.WriteString("\n" + m.message + "\n")
 	}
-	help := "↑↓ move · space select · enter open window · u up · s stop · r restart · e env · c claude · f refresh · q quit"
+	help := "↑↓ move · space select · enter open window · u up · s stop · r restart · e env · v volumes · c claude · f refresh · q quit"
 	if m.envs != nil {
 		help = "↑↓ move · enter switch · esc cancel"
+	}
+	if m.vols != nil {
+		help = "↑↓ move · enter reset · esc close"
+		if m.vols.confirm {
+			help = "y delete · any other key cancels"
+		}
 	}
 	b.WriteString("\n" + helpStyle.Render(help) + "\n")
 	if m.width > 0 {
@@ -745,6 +784,9 @@ func (m *dashboard) details(r orchestrate.ServiceStatus) string {
 	}
 	if len(r.DependsOn) > 0 {
 		add("Depends on", strings.Join(r.DependsOn, ", "))
+	}
+	if vols := m.volumesFor(r.Name); len(vols) > 0 {
+		add("Volumes", strings.Join(vols, ", ")+labelStyle.Render("  (v to reset)"))
 	}
 	return strings.Join(lines, "\n") + "\n"
 }
