@@ -220,7 +220,9 @@ container's health and what it depends on. It refreshes every two seconds.
 The screen is split into panels: the project, the repos and the services
 stacked on the left, with the focused list's border highlighted, and on the
 right a panel for the row under the cursor with three tabs. **Info** has the
-details above, **Env** has the repo's resolved variables and the file each
+details above plus the URLs the row answers on through the proxy, read from
+the Caddyfile's sites; terminals with OSC 8 hyperlinks make them clickable
+(in tmux, set `terminal-features` to include `hyperlinks`). **Env** has the repo's resolved variables and the file each
 came from (as `neptuno env show` prints them), and **Logs** follows the
 container's output (`docker compose logs`); a `run: host` repo's output is in
 its window. The keys run along the bottom. In a terminal under 70×14 it

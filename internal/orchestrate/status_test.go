@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/robertoplancarte/neptuno/internal/proxy"
 )
 
 // statusRunner answers the read-only commands Status runs.
@@ -44,6 +46,10 @@ func TestStatus(t *testing.T) {
 		"api: git status --porcelain --untracked-files=no":     " M app.rb",
 	}}
 	o.Runner = r
+	caddy := "http://web.localhost, http://*.web.localhost {\n\treverse_proxy web:3000\n}\n"
+	if err := os.WriteFile(filepath.Join(o.Project.Root, "Caddyfile"), []byte(caddy), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	got := map[string]ServiceStatus{}
 	var order []string
@@ -77,6 +83,12 @@ func TestStatus(t *testing.T) {
 	}
 	if web := got["web"]; web.State() != "exited" || web.Running() {
 		t.Errorf("web state = %s", web.State())
+	}
+	if want := []proxy.Link{{URL: "http://web.localhost"}, {URL: "http://*.web.localhost", Pattern: true}}; !reflect.DeepEqual(got["web"].URLs, want) {
+		t.Errorf("web URLs = %+v, want %+v", got["web"].URLs, want)
+	}
+	if u := got["api"].URLs; u != nil {
+		t.Errorf("api URLs = %+v, want none", u)
 	}
 	if pg := got["postgres"]; pg.Repo || pg.State() != "running" || !reflect.DeepEqual(pg.Ports, []string{"5432->5432"}) {
 		t.Errorf("postgres = %+v", pg)

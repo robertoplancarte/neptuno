@@ -11,6 +11,7 @@ import (
 
 	"github.com/robertoplancarte/neptuno/internal/env"
 	"github.com/robertoplancarte/neptuno/internal/project"
+	"github.com/robertoplancarte/neptuno/internal/proxy"
 	"github.com/robertoplancarte/neptuno/internal/state"
 )
 
@@ -45,6 +46,9 @@ type ServiceStatus struct {
 	// Envs are the configurations the repo can switch to, the default
 	// first.
 	Envs []string
+	// URLs are where the service answers through the reverse proxy, from
+	// the Caddyfile.
+	URLs []proxy.Link
 	// DependsOn lists the direct dependencies.
 	DependsOn []string
 	// Git describes the repo's checkout, or is nil when it has none.
@@ -119,12 +123,16 @@ func (o *Orchestrator) Status() []ServiceStatus {
 		}
 	}
 	st, _ := state.Load(p.Root)
+	sites, published := o.proxySites(containers)
 
 	var out []ServiceStatus
 	for _, name := range append(append([]string(nil), repos...), services...) {
 		s := ServiceStatus{Name: name, Repo: p.IsRepo(name), DependsOn: p.Services[name].DependsOn}
 		if c, ok := containers[name]; ok {
 			s.Container, s.Health, s.Ports = c.State, c.Health, c.ports()
+		}
+		if name != proxyService {
+			s.URLs = proxy.URLs(sites, name, published)
 		}
 		if s.Repo {
 			s.RunMode = p.RunMode(name)
@@ -145,6 +153,26 @@ func (o *Orchestrator) Status() []ServiceStatus {
 		out = append(out, s)
 	}
 	return out
+}
+
+// proxyService is the compose service that runs Caddy, as `neptuno init`
+// names it.
+const proxyService = "proxy"
+
+// proxySites reads the Caddyfile's sites, and the host ports the proxy
+// container publishes its ports on, such as 80 on 8080.
+func (o *Orchestrator) proxySites(containers map[string]composeContainer) ([]proxy.Site, map[int]int) {
+	src, err := os.ReadFile(o.Project.Path("Caddyfile"))
+	if err != nil {
+		return nil, nil
+	}
+	published := map[int]int{}
+	for _, p := range containers[proxyService].Publishers {
+		if p.PublishedPort != 0 {
+			published[p.TargetPort] = p.PublishedPort
+		}
+	}
+	return proxy.Parse(string(src)), published
 }
 
 // composeContainer is one entry of `docker compose ps --format json`.
