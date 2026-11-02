@@ -54,9 +54,11 @@ func newMCPCommand() *cobra.Command {
 		Long: "Writes the MCP servers the repos declare in neptuno.yml to the project's\n" +
 			".mcp.json, with their http://<repo>.localhost URLs, and to\n" +
 			".neptuno/claude/" + mcp.ContainerFile + ", with the URLs that work inside the\n" +
-			"containers. Servers you added to .mcp.json yourself are kept. Also writes a\n" +
-			"CLAUDE.md describing the project if there is none. `neptuno up` does the\n" +
-			"same each time it runs.",
+			"containers. Servers you added to .mcp.json yourself are kept. `neptuno up`\n" +
+			"does the same each time it runs.\n\n" +
+			"Also writes the project's AGENTS.md, CLAUDE.md and .claude/skills, which\n" +
+			"tell coding agents how to work in the project, where any is missing. Files\n" +
+			"you have already are left alone.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			o, err := loadOrchestrator(cmd)
@@ -75,12 +77,15 @@ func syncMCP(cmd *cobra.Command, o *orchestrate.Orchestrator) error {
 	if err != nil {
 		return err
 	}
-	wrote, err := scaffold.WriteClaudeMD(o.Project.Root, o.Project.Name)
+	wrote, err := scaffold.WriteAgentFiles(o.Project.Root, o.Project.Name)
+	for _, path := range wrote {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Wrote %s\n", path)
+	}
 	if err != nil {
 		return err
 	}
-	if wrote {
-		fmt.Fprintln(cmd.ErrOrStderr(), "Wrote CLAUDE.md, which tells Claude in the project folder how to work with the repos")
+	if len(wrote) > 0 {
+		fmt.Fprintln(cmd.ErrOrStderr(), "They tell Claude, Cursor and other agents in the project folder how to work with the repos.")
 	}
 	printServers(cmd.OutOrStdout(), servers)
 	return nil

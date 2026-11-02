@@ -29,7 +29,9 @@ acme/
 ├── compose.yml      # yours to edit: proxy, postgres, valkey, s3
 ├── Caddyfile        # yours to edit: one http://<repo>.localhost block per repo
 ├── neptuno.yml      # optional project config
-├── CLAUDE.md        # tells Claude in this folder how the project works
+├── AGENTS.md        # tells coding agents in this folder how the project works
+├── CLAUDE.md        # @AGENTS.md, so Claude Code reads the same
+├── .claude/skills/  # step-by-step guides agents load when a task needs them
 ├── environments/
 │   └── _shared/     # base.env and local.env every repo gets
 ├── dockerfiles/     # dockerfiles/<repo>/Dockerfile
@@ -323,12 +325,26 @@ folder (`--scope user`). A repo's own `.mcp.json` in
 `repos/<repo>` is still read by Claude in its container, so keep
 `*.localhost` addresses out of it.
 
-A Claude session in the project folder sees every repo, and
-`neptuno init` gives it a `CLAUDE.md` explaining the layout (`neptuno mcp
-sync` writes one into older projects). It can run tools in a container with
-`docker compose exec -T <repo> ...`, and hand a task to the Claude inside a
-repo's container with
+A Claude session in the project folder sees every repo. It can run tools in
+a container with `docker compose exec -T <repo> ...`, and hand a task to the
+Claude inside a repo's container with
 `docker compose exec -T <repo> claude -p "<task>" --mcp-config /root/.claude/neptuno-mcp.json`.
+
+### Instructions for coding agents
+
+`neptuno init` writes files that tell coding agents started in the project
+folder how the project works, in formats more than one tool reads:
+
+| File | Read by | Holds |
+| --- | --- | --- |
+| `AGENTS.md` | Cursor, Codex, Copilot and other tools that follow the AGENTS.md convention | the layout, the commands, working inside containers, MCP servers |
+| `CLAUDE.md` | Claude Code | `@AGENTS.md`, which imports it, plus any notes only for Claude |
+| `.claude/skills/<name>/SKILL.md` | Claude Code, and other tools that support Agent Skills | `neptuno-add-repo`, `neptuno-debug-service` and `neptuno-delegate-to-repo`: step-by-step guides loaded only when a task needs one |
+
+They are yours to edit: add your team's conventions to `AGENTS.md` and your
+own skills next to Neptuno's. `neptuno mcp sync` writes any that are
+missing into older projects and never touches the ones you have. Each repo
+keeps its own `AGENTS.md` or `CLAUDE.md` in `repos/<repo>` for its code.
 
 ### Claude desktop chat
 

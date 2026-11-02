@@ -1,0 +1,84 @@
+# {{.Name}}
+
+This folder is a [Neptuno](https://github.com/robertoplancarte/neptuno)
+project: a development environment for several repos, run with docker
+compose, overmind and tmux. Run every command below from this folder.
+
+## Layout
+
+- `repos/<repo>/`: each repo's source, as a git submodule. Code changes go
+  here, and each repo has its own git history, branches and guidelines (read
+  its own `AGENTS.md` or `CLAUDE.md` before changing it).
+- `dockerfiles/<repo>/`: the repo's development Dockerfile and its
+  `entrypoint.sh`, which runs setup such as `bundle install` at every start.
+- `procfiles/<repo>/Procfile`: the processes overmind runs for the repo.
+- `environments/`: env files. `_shared/` applies to every repo, then
+  `<repo>/base.env`, `<repo>/<env>.env` and git-ignored `*.local.env`.
+  `neptuno env show <repo>` prints the merged result and where each value
+  comes from.
+- `compose.yml`: the containers. Shared services are reachable from the
+  repos' containers by name: `postgres:5432`, `valkey:6379`, `s3:8333`.
+- `Caddyfile`: the reverse proxy, which serves each repo at
+  `http://<repo>.localhost` on this machine.
+- `neptuno.yml`: project settings, such as repos that run on the host
+  (`run: host`) and the MCP servers each repo serves.
+- `.neptuno/`: generated on every `neptuno up`. Don't edit it.
+
+## Running things
+
+- `neptuno status` lists every repo and service with its state, processes,
+  branch and commit.
+- `neptuno up -d <repo>` starts a repo and everything it depends on.
+  Always pass `-d`: without it Neptuno attaches to tmux and doesn't return.
+- `neptuno down <repo>` stops a repo. Always name the repo: with no
+  arguments it stops the whole project.
+- `neptuno restart <repo>` restarts a repo's processes, and
+  `neptuno restart <repo>:<process>` one of them.
+- `docker compose logs --tail 100 <repo>` shows a container's output,
+  including its `entrypoint.sh` setup.
+- After changing a Dockerfile, run `docker compose build <repo>` and then
+  `neptuno up -d <repo>`.
+
+## Working inside a repo
+
+Repos run in their containers, with their own language versions, packages
+and env, so run their tools there rather than on this machine:
+
+```sh
+docker compose exec -T <repo> <command>    # such as: docker compose exec -T api bin/rails test
+```
+
+`-T` gives plain output without a terminal. A repo with `run: host` in
+`neptuno.yml` runs on this machine instead: run its commands in
+`repos/<repo>`.
+
+## Handing work to Claude inside a repo's container
+
+Each repo's container has Claude Code, signed in through `.neptuno/claude`.
+For work that takes many steps inside one repo, hand it over and read the
+answer:
+
+```sh
+docker compose exec -T <repo> claude -p "<task>" --mcp-config /root/.claude/neptuno-mcp.json
+```
+
+`--mcp-config` gives it the project's MCP servers at the addresses that work
+inside containers. A person can open an interactive one with
+`neptuno claude <repo>`.
+
+## MCP servers
+
+Repos declare the MCP servers they serve in `neptuno.yml`, under
+`repos.<repo>.mcp`, with the path each answers on. `neptuno mcp` lists them
+with the URL that works on this machine (`http://<repo>.localhost/...`) and
+the one that works inside containers (`http://<repo>:<port>/...`).
+`neptuno up` writes the first kind to `.mcp.json` here.
+`neptuno mcp serve` offers all of this to MCP clients over stdio:
+Neptuno's own tools (status, up, down, exec, logs, handing a task to a
+repo's Claude) and every repo's MCP tools.
+
+## Skills
+
+`.claude/skills/` holds step-by-step guides for common jobs here: adding a
+repo, debugging a service that won't come up, and handing a task to a
+repo's Claude. Each `SKILL.md` starts with a description of when to use it.
