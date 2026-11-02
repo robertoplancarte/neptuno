@@ -147,6 +147,11 @@ func (o *Orchestrator) Up(opts UpOptions) error {
 	if err := state.Save(p.Root, st); err != nil {
 		return err
 	}
+	// After the save above, which would otherwise undo what SyncMCP
+	// records in the state file.
+	if _, err := o.SyncMCP(); err != nil {
+		fmt.Fprintf(o.Log, "warning: could not write the MCP configs: %v\n", err)
+	}
 
 	if len(windows) == 0 || opts.Detach {
 		if len(windows) > 0 {

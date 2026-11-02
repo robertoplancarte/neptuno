@@ -26,6 +26,7 @@ var files = []struct{ path, template string }{
 	{"neptuno.yml", "neptuno.yml.tmpl"},
 	{".gitignore", "gitignore.tmpl"},
 	{"README.md", "README.md.tmpl"},
+	{"CLAUDE.md", "CLAUDE.md.tmpl"},
 	{"environments/_shared/base.env", "shared_base.env.tmpl"},
 	{"environments/_shared/local.env", "shared_local.env.tmpl"},
 }
@@ -105,6 +106,24 @@ func Init(opts Options) ([]string, error) {
 	}
 
 	return created, nil
+}
+
+// WriteClaudeMD writes the project's CLAUDE.md, which tells Claude started
+// in the project folder how the project is laid out and how to work in the
+// repos' containers, unless the project has one. It reports whether it
+// wrote it.
+func WriteClaudeMD(root, name string) (bool, error) {
+	path := filepath.Join(root, "CLAUDE.md")
+	if _, err := os.Stat(path); err == nil {
+		return false, nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return false, err
+	}
+	out, err := render("CLAUDE.md.tmpl", struct{ Name string }{name})
+	if err != nil {
+		return false, err
+	}
+	return true, os.WriteFile(path, out, 0o644)
 }
 
 func ensureEmptyDir(dir string) error {

@@ -1,0 +1,48 @@
+# {{.Name}}
+
+This folder is a [Neptuno](https://github.com/robertoplancarte/neptuno)
+project: a development environment for several repos, run with docker
+compose, overmind and tmux. Run commands from this folder.
+
+## Layout
+
+- `repos/<repo>/`: each repo's source, as a git submodule. Code changes go here.
+- `dockerfiles/<repo>/`: the repo's development Dockerfile and `entrypoint.sh`.
+- `procfiles/<repo>/Procfile`: the processes overmind runs for the repo.
+- `environments/`: env files, merged by `neptuno env show <repo>`.
+- `compose.yml` and `Caddyfile`: the containers, and the reverse proxy that
+  serves each repo at `http://<repo>.localhost`.
+- `neptuno.yml`: project settings, including the MCP servers each repo serves.
+- `.neptuno/`: generated on every `neptuno up`. Don't edit it.
+
+## Working with the repos
+
+- `neptuno status` shows every repo and service, its state, branch and URLs.
+- `neptuno up -d <repo>` starts a repo and what it depends on, without
+  attaching to tmux. `neptuno down <repo>` stops it, and
+  `neptuno restart <repo>` restarts its processes.
+- Repos run in their containers, so run their tools there:
+  `docker compose exec -T <repo> <command>`, such as
+  `docker compose exec -T api bin/rails test`.
+- `docker compose logs --tail 100 <repo>` shows a repo's container output.
+
+## Handing work to Claude inside a repo's container
+
+Each repo's container has Claude Code, signed in through `.neptuno/claude`.
+To have it do a task next to the repo's own tools and services, and print
+the result:
+
+```sh
+docker compose exec -T <repo> claude -p "<task>" --mcp-config /root/.claude/neptuno-mcp.json
+```
+
+`--mcp-config` gives it the project's MCP servers at the addresses that work
+inside containers. A person can open an interactive one with
+`neptuno claude <repo>`.
+
+## MCP servers
+
+Repos declare the MCP servers they serve in `neptuno.yml`, under
+`repos.<repo>.mcp`. `neptuno mcp` lists them, and `neptuno up` writes them to
+`.mcp.json` here, with the `http://<repo>.localhost` addresses that work on
+this machine.

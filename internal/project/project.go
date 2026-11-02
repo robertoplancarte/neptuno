@@ -29,6 +29,10 @@ type RepoConfig struct {
 	// DependsOn lists services a host-mode repo needs. Container repos
 	// declare dependencies with depends_on in compose.yml instead.
 	DependsOn []string `yaml:"depends_on"`
+	// MCP names the MCP servers the repo serves and the path each answers
+	// on, such as hyperdrive: /_hyperdrive/mcp. Neptuno works out the
+	// host and port from the Caddyfile.
+	MCP map[string]string `yaml:"mcp"`
 }
 
 // Hooks are scripts run at lifecycle points, relative to the project root.

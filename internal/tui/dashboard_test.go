@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/robertoplancarte/neptuno/internal/env"
+	"github.com/robertoplancarte/neptuno/internal/mcp"
 	"github.com/robertoplancarte/neptuno/internal/orchestrate"
 	"github.com/robertoplancarte/neptuno/internal/proxy"
 )
@@ -231,5 +232,27 @@ func TestDetailsShowsProxyURLs(t *testing.T) {
 	plain := ansi.Strip(got)
 	if !strings.Contains(plain, "URL        http://api.localhost\n") || !strings.Contains(plain, "           http://*.api.localhost\n") {
 		t.Errorf("details =\n%s", plain)
+	}
+}
+
+func TestDetailsShowsMCPServers(t *testing.T) {
+	m := newTestDashboard()
+	r := dashboardRows()[0]
+	r.MCP = []mcp.Server{
+		{Repo: r.Name, Name: "hyperdrive", HostURL: "http://api.localhost/_hyperdrive/mcp", ContainerURL: "http://api:3000/_hyperdrive/mcp"},
+		{Repo: r.Name, Name: "tools"},
+	}
+	plain := ansi.Strip(m.details(r))
+	for _, want := range []string{
+		"MCP        " + r.Name + "-hyperdrive  http://api.localhost/_hyperdrive/mcp\n",
+		"           in containers http://api:3000/_hyperdrive/mcp\n",
+		"           " + r.Name + "-tools  no Caddyfile site\n",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("details missing %q:\n%s", want, plain)
+		}
+	}
+	if cells := m.repoCells(r); cells[0] != r.Name+" (mcp)" {
+		t.Errorf("repo cell = %q", cells[0])
 	}
 }

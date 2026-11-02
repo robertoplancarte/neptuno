@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/robertoplancarte/neptuno/internal/mcp"
 	"github.com/robertoplancarte/neptuno/internal/procfile"
 	"github.com/robertoplancarte/neptuno/internal/project"
 	"gopkg.in/yaml.v3"
@@ -72,9 +73,18 @@ func (o *Orchestrator) Claude(opts ClaudeOptions) error {
 		}
 	}
 
+	servers, err := o.SyncMCP()
+	if err != nil {
+		fmt.Fprintf(o.Log, "warning: could not write the MCP configs: %v\n", err)
+	}
+	claudeArgs := opts.Args
+	if hasContainerURL(servers) && o.mountsClaudeConfig(repo) {
+		claudeArgs = withMCPConfig(opts.Args)
+	}
+
 	q := procfile.Quote
 	args := []string{"docker", "compose", "exec", q(repo), "claude"}
-	for _, a := range opts.Args {
+	for _, a := range claudeArgs {
 		args = append(args, q(a))
 	}
 	// Keep the window open on failure, such as claude missing from an
@@ -152,6 +162,27 @@ func (o *Orchestrator) mountsClaudeConfig(repo string) bool {
 					return true
 				}
 			}
+		}
+	}
+	return false
+}
+
+// withMCPConfig adds --mcp-config with the project's MCP servers to
+// claude's arguments. It goes after them, since --mcp-config takes every
+// argument up to the next flag, but before a "--", after which nothing is a
+// flag.
+func withMCPConfig(args []string) []string {
+	flag := []string{"--mcp-config", ContainerMCPConfig}
+	if i := slices.Index(args, "--"); i >= 0 {
+		return slices.Concat(args[:i], flag, args[i:])
+	}
+	return slices.Concat(args, flag)
+}
+
+func hasContainerURL(servers []mcp.Server) bool {
+	for _, s := range servers {
+		if s.ContainerURL != "" {
+			return true
 		}
 	}
 	return false

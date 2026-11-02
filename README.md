@@ -6,7 +6,7 @@ compose for containers, overmind for processes and tmux for terminals. It aims
 to be opinionated enough to get you going fast, and customizable enough to run
 just the way you work.
 
-> Status: early. `init`, `add`, `up`, `down`, `claude`, `env use/show` and the dashboard work; `sync` and `doctor` are on the way.
+> Status: early. `init`, `add`, `up`, `down`, `claude`, `mcp`, `env use/show` and the dashboard work; `sync` and `doctor` are on the way.
 
 ## Install
 
@@ -29,6 +29,7 @@ acme/
 ├── compose.yml      # yours to edit: proxy, postgres, valkey, s3
 ├── Caddyfile        # yours to edit: one http://<repo>.localhost block per repo
 ├── neptuno.yml      # optional project config
+├── CLAUDE.md        # tells Claude in this folder how the project works
 ├── environments/
 │   └── _shared/     # base.env and local.env every repo gets
 ├── dockerfiles/     # dockerfiles/<repo>/Dockerfile
@@ -285,6 +286,44 @@ once per project and it survives rebuilds. For services added before this, add
 `CLAUDE_CODE_OAUTH_TOKEN` in `environments/_shared/*.local.env`), and rebuild
 the image with `docker compose build <repo>` after adding Claude Code to its
 Dockerfile.
+
+## MCP servers your repos serve
+
+When a repo runs an MCP server, declare it in `neptuno.yml` with the path it
+answers on. Neptuno finds the host and port in the Caddyfile:
+
+```yaml
+repos:
+  locke:
+    mcp:
+      hyperdrive: /_hyperdrive/mcp
+```
+
+The server is reached at a different address depending on where Claude runs,
+and Neptuno hands each Claude the one that works there:
+
+| Claude runs | It gets | Address |
+| --- | --- | --- |
+| In the project folder, in the terminal or the Claude desktop app's Code tab | `.mcp.json` in the project root | `http://locke.localhost/_hyperdrive/mcp`, through Caddy |
+| In a repo's container (`neptuno claude <repo>`) | `--mcp-config /root/.claude/neptuno-mcp.json` | `http://locke:3000/_hyperdrive/mcp`, on the compose network |
+
+Inside a container `locke.localhost` points back at that container, so the
+Caddy address does not work there. `neptuno up` rewrites both files each time
+it runs, and `neptuno mcp sync` does it without starting anything. Servers
+you add to `.mcp.json` yourself are kept, and Claude asks you to approve
+the project's servers the first time it starts in the folder.
+`neptuno mcp` lists every declared server with both addresses, and the
+dashboard's **Info** tab shows them for the repo under the cursor, with
+`(mcp)` after the names of repos that serve one. A repo's own `.mcp.json` in
+`repos/<repo>` is still read by Claude in its container, so keep
+`*.localhost` addresses out of it.
+
+A Claude session in the project folder sees every repo, and
+`neptuno init` gives it a `CLAUDE.md` explaining the layout (`neptuno mcp
+sync` writes one into older projects). It can run tools in a container with
+`docker compose exec -T <repo> ...`, and hand a task to the Claude inside a
+repo's container with
+`docker compose exec -T <repo> claude -p "<task>" --mcp-config /root/.claude/neptuno-mcp.json`.
 
 ## Environments
 

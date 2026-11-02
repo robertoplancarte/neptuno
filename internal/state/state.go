@@ -19,6 +19,10 @@ type State struct {
 	// LastUp is the selection from the last `neptuno up`, used to preselect
 	// the menu.
 	LastUp []string `json:"last_up,omitempty"`
+	// MCPServers are the servers Neptuno last wrote to the project's
+	// .mcp.json, so it can drop them once they are no longer declared and
+	// leave the ones you added alone.
+	MCPServers []string `json:"mcp_servers,omitempty"`
 }
 
 // Path returns the state file path under a project root.
