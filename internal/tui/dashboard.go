@@ -63,6 +63,10 @@ type dashboard struct {
 	// envs is the open env chooser, or nil.
 	envs   *envChooser
 	lastIn map[bool]int
+	// actions holds each service's last background action, and nextAction
+	// numbers them.
+	actions    map[string]*action
+	nextAction int
 }
 
 // envChooser picks the configuration a repo runs with.
@@ -82,7 +86,7 @@ func newDashboard(opts DashboardOptions) *dashboard {
 	if opts.Refresh == 0 {
 		opts.Refresh = 2 * time.Second
 	}
-	return &dashboard{opts: opts, selected: map[string]bool{}, now: time.Now, lastIn: map[bool]int{}}
+	return &dashboard{opts: opts, selected: map[string]bool{}, now: time.Now, lastIn: map[bool]int{}, actions: map[string]*action{}}
 }
 
 // RunDashboard shows the interactive dashboard until the user quits.
@@ -135,6 +139,8 @@ func (m *dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.panel = msg
 		}
 		return m, nil
+	case actionMsg:
+		return m, m.handleAction(msg)
 	case doneMsg:
 		if msg.err != nil {
 			m.message = warnStyle.Render(fmt.Sprintf("%s failed: %v", msg.action, msg.err))
@@ -254,12 +260,12 @@ func (m *dashboard) key(key string) (tea.Model, tea.Cmd) {
 	case "u":
 		if names := m.targets(); len(names) > 0 {
 			m.selected = map[string]bool{}
-			return m, m.run("up "+strings.Join(names, " "), append([]string{"up", "--detach"}, names...)...)
+			return m, m.run("up "+strings.Join(names, " "), names, append([]string{"up", "--detach"}, names...)...)
 		}
 	case "s":
 		if names := m.targets(); len(names) > 0 {
 			m.selected = map[string]bool{}
-			return m, m.run("down "+strings.Join(names, " "), append([]string{"down"}, names...)...)
+			return m, m.run("down "+strings.Join(names, " "), names, append([]string{"down"}, names...)...)
 		}
 	case "r":
 		switch {
@@ -269,7 +275,7 @@ func (m *dashboard) key(key string) (tea.Model, tea.Cmd) {
 		case !row.Overmind:
 			m.message = row.Name + " is not running; press u to start it"
 		default:
-			return m, m.run("restart "+row.Name, "restart", row.Name)
+			return m, m.run("restart "+row.Name, []string{row.Name}, "restart", row.Name)
 		}
 	case "c":
 		switch {
@@ -277,7 +283,7 @@ func (m *dashboard) key(key string) (tea.Model, tea.Cmd) {
 		case !row.Repo || row.RunMode != "container":
 			m.message = "Claude Code runs in a repo's container"
 		default:
-			return m, m.run("claude "+row.Name, "claude", row.Name)
+			return m, m.foreground("claude "+row.Name, "claude", row.Name)
 		}
 	case "enter":
 		switch {
@@ -319,7 +325,7 @@ func (m *dashboard) envKey(key string) tea.Cmd {
 			m.message = repo + " already uses " + config
 			return nil
 		}
-		return m.runAll(fmt.Sprintf("switch %s to %s", repo, config), switchEnvCommands(c.row, config)...)
+		return m.runAll(fmt.Sprintf("switch %s to %s", repo, config), []string{repo}, switchEnvCommands(c.row, config)...)
 	}
 	return nil
 }
@@ -339,24 +345,14 @@ func switchEnvCommands(r orchestrate.ServiceStatus, config string) [][]string {
 	return cmds
 }
 
-// run runs a neptuno command with the terminal, keeping its output on
-// screen when it fails.
-func (m *dashboard) run(action string, args ...string) tea.Cmd {
-	return m.runAll(action, args)
-}
-
-// runAll runs neptuno commands one after another, stopping at the first
-// that fails.
-func (m *dashboard) runAll(action string, cmds ...[]string) tea.Cmd {
-	var commands []string
-	for _, args := range cmds {
-		command := procfile.Quote(m.opts.Neptuno)
-		for _, a := range args {
-			command += " " + procfile.Quote(a)
-		}
-		commands = append(commands, command)
+// foreground runs an interactive neptuno command, such as claude, with the
+// terminal, keeping its output on screen when it fails.
+func (m *dashboard) foreground(action string, args ...string) tea.Cmd {
+	command := procfile.Quote(m.opts.Neptuno)
+	for _, a := range args {
+		command += " " + procfile.Quote(a)
 	}
-	script := strings.Join(commands, " && ") + ` || { status=$?; echo; echo "Press enter to return to the dashboard."; read _; exit $status; }`
+	script := command + ` || { status=$?; echo; echo "Press enter to return to the dashboard."; read _; exit $status; }`
 	cmd := exec.Command("sh", "-c", script)
 	cmd.Dir = m.opts.Root
 	return tea.ExecProcess(cmd, func(err error) tea.Msg { return doneMsg{action, err} })

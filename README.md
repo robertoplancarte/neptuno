@@ -242,6 +242,13 @@ Picking one with `e` runs `neptuno env use <repo>=<env>`; if the repo is
 running, `neptuno up` then recreates its container with the new env and
 restarts its processes (a `run: host` repo gets `neptuno restart`).
 
+`u`, `s`, `r` and `e` run in the background, so the dashboard stays up. Each
+command's output goes to the Logs tab of every service it acts on, which the
+right panel switches to when that includes the row under the cursor: below
+the container's output while it runs or after it fails, above it once it
+succeeds. The bottom line says when it is done or failed, and a service
+takes one command at a time.
+
 `neptuno up` makes the dashboard the first window of the `neptuno-<project>`
 session, named `neptuno`, so attaching lands on it. Quitting it closes that
 window, and the next `neptuno up` brings it back. `neptuno status` prints
