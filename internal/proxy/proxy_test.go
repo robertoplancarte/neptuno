@@ -44,11 +44,11 @@ api.example.test{
 func TestParse(t *testing.T) {
 	got := Parse(caddyfile)
 	want := []Site{
-		{Addresses: []string{"http://s3.localhost"}, Upstreams: []string{"s3"}},
-		{Addresses: []string{"http://web.localhost", "http://*.web.localhost"}, Upstreams: []string{"web"}},
-		{Addresses: []string{"http://shop.localhost"}, Upstreams: []string{"api", "shop"}},
-		{Addresses: []string{"http://docs.localhost"}, Upstreams: []string{"host.docker.internal"}},
-		{Addresses: []string{"api.example.test"}, Upstreams: []string{"api"}},
+		{Addresses: []string{"http://s3.localhost"}, Upstreams: []string{"s3"}, Dials: []string{"s3:8333"}},
+		{Addresses: []string{"http://web.localhost", "http://*.web.localhost"}, Upstreams: []string{"web"}, Dials: []string{"web:3000"}},
+		{Addresses: []string{"http://shop.localhost"}, Upstreams: []string{"api", "shop"}, Dials: []string{"api:4000", "shop:5000"}},
+		{Addresses: []string{"http://docs.localhost"}, Upstreams: []string{"host.docker.internal"}, Dials: []string{"host.docker.internal:8000"}},
+		{Addresses: []string{"api.example.test"}, Upstreams: []string{"api"}, Dials: []string{"api:4000"}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Parse =\n%+v\nwant\n%+v", got, want)

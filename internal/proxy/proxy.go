@@ -16,6 +16,9 @@ type Site struct {
 	// Upstreams are the hosts its reverse_proxy directives dial, such as
 	// web for reverse_proxy web:3000.
 	Upstreams []string
+	// Dials are the same upstreams with their ports, as the proxy dials
+	// them on the compose network, such as web:3000.
+	Dials []string
 }
 
 // Parse reads the site blocks of a Caddyfile. It understands the shape
@@ -40,7 +43,9 @@ func Parse(src string) []Site {
 				cur = nil // global options or a snippet
 			}
 		} else if cur != nil && f[0] == "reverse_proxy" {
-			cur.Upstreams = append(cur.Upstreams, upstreams(f[1:])...)
+			hosts, dials := upstreams(f[1:])
+			cur.Upstreams = append(cur.Upstreams, hosts...)
+			cur.Dials = append(cur.Dials, dials...)
 		}
 		for _, t := range f {
 			switch t {
@@ -98,9 +103,9 @@ func splitAddresses(tokens []string) []string {
 }
 
 // upstreams reads reverse_proxy's arguments, skipping a matcher such as
-// /api/* or @name and stopping at its options block.
-func upstreams(args []string) []string {
-	var out []string
+// /api/* or @name and stopping at its options block. It returns each
+// upstream's host and its host:port.
+func upstreams(args []string) (hosts, dials []string) {
 	for i, a := range args {
 		if a == "{" {
 			break
@@ -116,10 +121,10 @@ func upstreams(args []string) []string {
 			host = h
 		}
 		if host != "" {
-			out = append(out, host)
+			hosts, dials = append(hosts, host), append(dials, a)
 		}
 	}
-	return out
+	return hosts, dials
 }
 
 // Link is one place a service answers.

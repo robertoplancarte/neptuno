@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/robertoplancarte/neptuno/internal/env"
+	"github.com/robertoplancarte/neptuno/internal/mcp"
 	"github.com/robertoplancarte/neptuno/internal/project"
 	"github.com/robertoplancarte/neptuno/internal/proxy"
 	"github.com/robertoplancarte/neptuno/internal/state"
@@ -49,6 +50,8 @@ type ServiceStatus struct {
 	// URLs are where the service answers through the reverse proxy, from
 	// the Caddyfile.
 	URLs []proxy.Link
+	// MCP are the MCP servers it declares in neptuno.yml.
+	MCP []mcp.Server
 	// DependsOn lists the direct dependencies.
 	DependsOn []string
 	// Git describes the repo's checkout, or is nil when it has none.
@@ -124,6 +127,7 @@ func (o *Orchestrator) Status() []ServiceStatus {
 	}
 	st, _ := state.Load(p.Root)
 	sites, published := o.proxySites(containers)
+	servers, _ := mcp.Servers(p, sites, published)
 
 	var out []ServiceStatus
 	for _, name := range append(append([]string(nil), repos...), services...) {
@@ -134,6 +138,7 @@ func (o *Orchestrator) Status() []ServiceStatus {
 		if name != proxyService {
 			s.URLs = proxy.URLs(sites, name, published)
 		}
+		s.MCP = mcp.ForRepo(servers, name)
 		if s.Repo {
 			s.RunMode = p.RunMode(name)
 			if s.RunMode == project.RunHost {

@@ -104,3 +104,19 @@ func read(t *testing.T, path string) string {
 	}
 	return string(b)
 }
+
+func TestWriteClaudeMDKeepsAnExistingOne(t *testing.T) {
+	root := t.TempDir()
+	if wrote, err := WriteClaudeMD(root, "acme"); err != nil || !wrote {
+		t.Fatalf("WriteClaudeMD = %v, %v", wrote, err)
+	}
+	if got := read(t, filepath.Join(root, "CLAUDE.md")); !strings.Contains(got, "# acme\n") || !strings.Contains(got, "neptuno-mcp.json") {
+		t.Errorf("CLAUDE.md =\n%s", got)
+	}
+	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if wrote, err := WriteClaudeMD(root, "acme"); err != nil || wrote {
+		t.Fatalf("WriteClaudeMD over an existing file = %v, %v", wrote, err)
+	}
+}

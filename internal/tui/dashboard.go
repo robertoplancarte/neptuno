@@ -502,7 +502,11 @@ func (m *dashboard) repoCells(r orchestrate.ServiceStatus) []string {
 			date = m.formatDate(g.Date)
 		}
 	}
-	return []string{r.Name, stateLabel(r), procs, branch, commit, date, plainEnvList(r)}
+	name := r.Name
+	if len(r.MCP) > 0 {
+		name += " (mcp)"
+	}
+	return []string{name, stateLabel(r), procs, branch, commit, date, plainEnvList(r)}
 }
 
 // plainEnvList lists a repo's envs with the active one in brackets, such as
@@ -687,6 +691,20 @@ func (m *dashboard) details(r orchestrate.ServiceStatus) string {
 			label = "URL"
 		}
 		add(label, hyperlink(l))
+	}
+	for i, srv := range r.MCP {
+		label := ""
+		if i == 0 {
+			label = "MCP"
+		}
+		url := labelStyle.Render("no Caddyfile site")
+		if srv.HostURL != "" {
+			url = hyperlink(proxy.Link{URL: srv.HostURL})
+		}
+		add(label, srv.ID()+"  "+url)
+		if srv.ContainerURL != "" {
+			add("", labelStyle.Render("in containers ")+srv.ContainerURL)
+		}
 	}
 	if len(r.DependsOn) > 0 {
 		add("Depends on", strings.Join(r.DependsOn, ", "))
