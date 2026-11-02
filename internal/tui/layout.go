@@ -121,7 +121,8 @@ func (m *dashboard) layoutView() string {
 			svcs = append(svcs, i)
 		}
 	}
-	projectH := 4
+	projectLines := m.projectLines()
+	projectH := len(projectLines) + 2
 	rest := bodyH - projectH
 	inRepos := false
 	if r, ok := m.current(); ok {
@@ -139,7 +140,7 @@ func (m *dashboard) layoutView() string {
 	}
 
 	left := lipgloss.JoinVertical(lipgloss.Left,
-		box("Project", m.projectLines(), leftW, projectH, false),
+		box("Project", projectLines, leftW, projectH, false),
 		box(fmt.Sprintf("Repos %d", len(repos)), m.listLines(repos, repoH-2, leftW-2), leftW, repoH, inRepos),
 		box(fmt.Sprintf("Services %d", len(svcs)), m.listLines(svcs, svcH-2, leftW-2), leftW, svcH, !inRepos),
 	)
@@ -159,7 +160,29 @@ func (m *dashboard) projectLines() []string {
 	if !m.updated.IsZero() {
 		updated = "updated " + m.updated.Format("15:04:05")
 	}
-	return []string{line, labelStyle.Render(m.opts.Session + " · " + updated)}
+	lines := []string{line, labelStyle.Render(m.opts.Session + " · " + updated)}
+	if l := m.mcpLine(); l != "" {
+		lines = append(lines, l)
+	}
+	return lines
+}
+
+// mcpLine says where the project's MCP servers are set up: in .mcp.json for
+// Claude in the project folder, and in Claude desktop.
+func (m *dashboard) mcpLine() string {
+	s := m.mcp
+	if s == nil || s.Servers == 0 {
+		return ""
+	}
+	mark := func(ok bool, yes, no string) string {
+		if ok {
+			return okStyle.Render("✓") + " " + yes
+		}
+		return warnStyle.Render("✗") + " " + no
+	}
+	return fmt.Sprintf("MCP %d · %s · %s", s.Servers,
+		mark(s.ProjectFileCurrent, ".mcp.json", ".mcp.json (neptuno mcp sync)"),
+		mark(s.Desktop, "desktop", "desktop (neptuno mcp desktop)"))
 }
 
 // listLines renders the rows at idx, scrolled so the cursor shows.
@@ -238,6 +261,8 @@ func (m *dashboard) rightLines(height, width int) []string {
 	switch {
 	case m.envs != nil:
 		text = m.envView()
+	case m.menu != nil:
+		text = m.menuView()
 	case !ok:
 		text = "compose.yml has no services yet; add a repo with `neptuno add`."
 	case m.tab == tabInfo:
@@ -254,7 +279,7 @@ func (m *dashboard) rightLines(height, width int) []string {
 	}
 	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
 	// Logs follow the end, like tail -f, unless scrolled up.
-	if m.tab == tabLogs && m.envs == nil {
+	if m.tab == tabLogs && m.envs == nil && m.menu == nil {
 		end := max(0, len(lines)-height-m.scroll)
 		m.scroll = min(m.scroll, max(0, len(lines)-height))
 		lines = lines[end:]
@@ -273,9 +298,12 @@ func (m *dashboard) rightLines(height, width int) []string {
 
 func (m *dashboard) keyBar(width int) string {
 	keys := [][2]string{{"enter", "open"}, {"u", "up"}, {"s", "stop"}, {"r", "restart"}, {"e", "env"},
-		{"c", "claude"}, {"space", "select"}, {"tab", "panel"}, {"[ ]", "tab"}, {"q", "quit"}}
+		{"c", "claude"}, {"m", "mcp"}, {"space", "select"}, {"tab", "panel"}, {"[ ]", "tab"}, {"q", "quit"}}
 	if m.envs != nil {
 		keys = [][2]string{{"↑↓", "choose"}, {"enter", "switch"}, {"esc", "cancel"}}
+	}
+	if m.menu != nil {
+		keys = [][2]string{{"↑↓", "choose"}, {"enter", "do it"}, {"esc", "cancel"}}
 	}
 	var parts []string
 	for _, k := range keys {

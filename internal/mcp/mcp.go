@@ -258,3 +258,24 @@ func normalize(b []byte) []byte {
 	out, _ := json.Marshal(v)
 	return out
 }
+
+// ProjectFileCurrent reports whether the project's .mcp.json has every
+// server with a host URL, at that URL.
+func ProjectFileCurrent(root string, servers []Server) bool {
+	b, err := os.ReadFile(filepath.Join(root, ProjectFile))
+	if err != nil {
+		return false
+	}
+	var doc struct {
+		MCPServers map[string]entry `json:"mcpServers"`
+	}
+	if json.Unmarshal(b, &doc) != nil {
+		return false
+	}
+	for _, s := range servers {
+		if s.HostURL != "" && doc.MCPServers[s.ID()].URL != s.HostURL {
+			return false
+		}
+	}
+	return true
+}

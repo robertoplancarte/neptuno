@@ -73,6 +73,7 @@ func dashboardHere(o *orchestrate.Orchestrator) error {
 		Status:  o.Status,
 		Vars:    o.EnvVars,
 		Logs:    o.Logs,
+		MCP:     o.MCPSummary,
 	})
 }
 

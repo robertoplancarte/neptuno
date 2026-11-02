@@ -242,9 +242,10 @@ func TestDetailsShowsMCPServers(t *testing.T) {
 		{Repo: r.Name, Name: "hyperdrive", HostURL: "http://api.localhost/_hyperdrive/mcp", ContainerURL: "http://api:3000/_hyperdrive/mcp"},
 		{Repo: r.Name, Name: "tools"},
 	}
+	r.MCPHealth = map[string]mcp.Health{r.Name + "-hyperdrive": mcp.Up}
 	plain := ansi.Strip(m.details(r))
 	for _, want := range []string{
-		"MCP        " + r.Name + "-hyperdrive  http://api.localhost/_hyperdrive/mcp\n",
+		"MCP        " + r.Name + "-hyperdrive  http://api.localhost/_hyperdrive/mcp  ● answering\n",
 		"           in containers http://api:3000/_hyperdrive/mcp\n",
 		"           " + r.Name + "-tools  no Caddyfile site\n",
 	} {
@@ -254,5 +255,74 @@ func TestDetailsShowsMCPServers(t *testing.T) {
 	}
 	if cells := m.repoCells(r); cells[0] != r.Name+" (mcp)" {
 		t.Errorf("repo cell = %q", cells[0])
+	}
+}
+
+func TestHealthLabel(t *testing.T) {
+	r := dashboardRows()[0]
+	id := r.Name + "-x"
+	cases := map[mcp.Health]string{mcp.Up: "● answering", mcp.Down: "● not answering", mcp.NotFound: "● nothing at this path"}
+	for h, want := range cases {
+		r.MCPHealth = map[string]mcp.Health{id: h}
+		if got := ansi.Strip(healthLabel(r, id)); got != want {
+			t.Errorf("healthLabel(%s) = %q, want %q", h, got, want)
+		}
+	}
+	r.Container, r.Overmind = "", false
+	if got := ansi.Strip(healthLabel(r, id)); got != "stopped" {
+		t.Errorf("healthLabel of a stopped repo = %q", got)
+	}
+}
+
+func TestMCPMenu(t *testing.T) {
+	rows := dashboardRows()
+	rows[0].MCP = []mcp.Server{{Repo: rows[0].Name, Name: "hyperdrive", HostURL: "http://api.localhost/mcp", ContainerURL: "http://api:3000/mcp"}}
+	var copied []string
+	var ran []string
+	m := newDashboard(DashboardOptions{Project: "acme", Status: func() []orchestrate.ServiceStatus { return rows },
+		Copy: func(s string) error { copied = append(copied, s); return nil },
+		Exec: func(name string, args ...string) (string, error) {
+			ran = append(ran, name+" "+strings.Join(args, " "))
+			return "", nil
+		}})
+	m.Update(statusMsg(rows))
+
+	key(m, "m")
+	if m.menu == nil || len(m.menu.items) != 4 {
+		t.Fatalf("menu = %+v", m.menu)
+	}
+	if !strings.Contains(ansi.Strip(m.menuView()), "> Copy api-hyperdrive's URL for this machine") {
+		t.Errorf("menu view =\n%s", ansi.Strip(m.menuView()))
+	}
+	key(m, "enter")
+	key(m, "m", "down", "enter")
+	want := []string{"http://api.localhost/mcp", "claude mcp add --transport http --scope user api-hyperdrive http://api.localhost/mcp"}
+	if !reflect.DeepEqual(copied, want) {
+		t.Errorf("copied %q, want %q", copied, want)
+	}
+	key(m, "m", "down", "down")
+	if cmd := key(m, "enter"); cmd != nil {
+		cmd()
+	}
+	if len(ran) != 1 || ran[0] != "claude mcp add --transport http --scope user api-hyperdrive http://api.localhost/mcp" {
+		t.Errorf("ran %q", ran)
+	}
+
+	key(m, "down") // web, which has no MCP servers
+	key(m, "m")
+	if m.menu != nil || !strings.Contains(m.message, "declares no MCP servers") {
+		t.Errorf("opened a menu for a repo without servers: %q", m.message)
+	}
+}
+
+func TestProjectPanelMCPLine(t *testing.T) {
+	m := newTestDashboard()
+	if len(m.projectLines()) != 2 {
+		t.Errorf("project panel shows MCP with no servers declared: %q", m.projectLines())
+	}
+	m.Update(mcpMsg(orchestrate.MCPSummary{Servers: 2, ProjectFileCurrent: true}))
+	lines := m.projectLines()
+	if got := ansi.Strip(lines[len(lines)-1]); got != "MCP 2 · ✓ .mcp.json · ✗ desktop (neptuno mcp desktop)" {
+		t.Errorf("MCP line = %q", got)
 	}
 }
