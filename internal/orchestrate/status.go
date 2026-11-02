@@ -52,6 +52,9 @@ type ServiceStatus struct {
 	URLs []proxy.Link
 	// MCP are the MCP servers it declares in neptuno.yml.
 	MCP []mcp.Server
+	// MCPHealth is what a quick request to each of them found, by ID,
+	// while the service runs.
+	MCPHealth map[string]mcp.Health
 	// DependsOn lists the direct dependencies.
 	DependsOn []string
 	// Git describes the repo's checkout, or is nil when it has none.
@@ -157,7 +160,32 @@ func (o *Orchestrator) Status() []ServiceStatus {
 		}
 		out = append(out, s)
 	}
+	probeMCP(out)
 	return out
+}
+
+// probeMCP checks the MCP servers of every running service, all at once.
+func probeMCP(rows []ServiceStatus) {
+	var servers []mcp.Server
+	for _, r := range rows {
+		if r.Running() {
+			servers = append(servers, r.MCP...)
+		}
+	}
+	if len(servers) == 0 {
+		return
+	}
+	health := mcp.ProbeAll(servers, 800*time.Millisecond)
+	for i, r := range rows {
+		for _, srv := range r.MCP {
+			if h, ok := health[srv.ID()]; ok {
+				if rows[i].MCPHealth == nil {
+					rows[i].MCPHealth = map[string]mcp.Health{}
+				}
+				rows[i].MCPHealth[srv.ID()] = h
+			}
+		}
+	}
 }
 
 // proxyService is the compose service that runs Caddy, as `neptuno init`

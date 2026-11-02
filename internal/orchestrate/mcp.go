@@ -51,3 +51,28 @@ func (o *Orchestrator) SyncMCP() ([]mcp.Server, error) {
 	}
 	return servers, nil
 }
+
+// MCPSummary is where the project's MCP servers are set up, for the
+// dashboard.
+type MCPSummary struct {
+	// Servers is how many the repos declare.
+	Servers int
+	// ProjectFileCurrent is true when .mcp.json has every one of them at
+	// its current URL.
+	ProjectFileCurrent bool
+	// Desktop is true when Claude desktop's config runs `neptuno mcp serve`
+	// for this project.
+	Desktop bool
+}
+
+// MCPSummary reports how far the project's MCP servers are set up.
+func (o *Orchestrator) MCPSummary() MCPSummary {
+	servers, _ := o.MCPServers()
+	sum := MCPSummary{Servers: len(servers)}
+	sum.ProjectFileCurrent = mcp.ProjectFileCurrent(o.Project.Root, servers)
+	if path, err := mcp.DesktopConfigPath(); err == nil {
+		e, _ := mcp.ReadDesktop(path, mcp.DesktopName(o.Project.Name))
+		sum.Desktop = e != nil
+	}
+	return sum
+}

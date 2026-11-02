@@ -242,6 +242,7 @@ falls back to a plain list.
 | `r` | restart a repo's processes |
 | `e` | switch a repo's env, then restart it if it is running |
 | `c` | open Claude Code in a repo's container |
+| `m` | copy a repo's MCP URLs, or add its servers to Claude Code |
 | `q` | quit |
 
 A repo's envs are the `<name>.env` files in `environments/_shared` and
@@ -312,9 +313,13 @@ Caddy address does not work there. `neptuno up` rewrites both files each time
 it runs, and `neptuno mcp sync` does it without starting anything. Servers
 you add to `.mcp.json` yourself are kept, and Claude asks you to approve
 the project's servers the first time it starts in the folder.
-`neptuno mcp` lists every declared server with both addresses, and the
-dashboard's **Info** tab shows them for the repo under the cursor, with
-`(mcp)` after the names of repos that serve one. A repo's own `.mcp.json` in
+`neptuno mcp` lists every declared server with both addresses. The
+dashboard's **Info** tab shows them for the repo under the cursor, and
+whether each one answers. Repos that serve one have `(mcp)` after their
+names, and the project panel shows whether `.mcp.json` is current and
+whether Claude desktop has the project. `m` opens a menu to copy a server's
+URLs or its `claude mcp add` command, or to add it to Claude Code for every
+folder (`--scope user`). A repo's own `.mcp.json` in
 `repos/<repo>` is still read by Claude in its container, so keep
 `*.localhost` addresses out of it.
 
@@ -324,6 +329,40 @@ sync` writes one into older projects). It can run tools in a container with
 `docker compose exec -T <repo> ...`, and hand a task to the Claude inside a
 repo's container with
 `docker compose exec -T <repo> claude -p "<task>" --mcp-config /root/.claude/neptuno-mcp.json`.
+
+### Claude desktop chat
+
+Claude desktop's own connectors are reached from Anthropic's servers, so
+they can't see `*.localhost`. What it can run is a local server, so Neptuno
+provides one:
+
+```sh
+neptuno mcp desktop            # add this project to Claude desktop, then restart it
+neptuno mcp desktop --remove   # take it out again
+```
+
+This adds `neptuno mcp serve --project <folder>` to
+`claude_desktop_config.json` as `neptuno-<project>`, along with your `PATH`,
+because apps started from the dock don't get your shell's `PATH` and so
+couldn't find docker. The server talks MCP over stdio and has two kinds of
+tools:
+
+| Tool | Does |
+| --- | --- |
+| `neptuno_status` | what `neptuno status` prints |
+| `neptuno_up`, `neptuno_down`, `neptuno_restart` | start, stop and restart repos and services |
+| `neptuno_exec` | run a shell command in a repo's container (or in `repos/<repo>` for `run: host`) |
+| `neptuno_logs` | the end of a container's output |
+| `neptuno_ask_repo_claude` | hand a task to Claude Code in a repo's container and return its answer |
+| `neptuno_mcp_servers` | the declared servers and whether they are reachable |
+| `<repo>-<server>__<tool>` | every tool of every declared server, forwarded |
+
+A server whose repo isn't running yet is tried again every 15 seconds and on
+each call, and its tools show up once it answers. Only tools are forwarded,
+not resources or prompts. Claude desktop asks before it runs a tool, and
+`neptuno_exec` can run anything in your containers, so read what it is about
+to run. Any other MCP client that starts local servers can run
+`neptuno mcp serve` the same way.
 
 ## Environments
 

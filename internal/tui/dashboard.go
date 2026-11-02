@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/robertoplancarte/neptuno/internal/env"
+	"github.com/robertoplancarte/neptuno/internal/mcp"
 	"github.com/robertoplancarte/neptuno/internal/orchestrate"
 	"github.com/robertoplancarte/neptuno/internal/procfile"
 	"github.com/robertoplancarte/neptuno/internal/proxy"
@@ -32,10 +33,20 @@ type DashboardOptions struct {
 	Vars func(repo string) ([]env.Var, error)
 	// Logs returns a service's recent container output, for the Logs tab.
 	Logs func(name string) (string, error)
+	// MCP reports how far the project's MCP servers are set up, for the
+	// project panel. It runs off the UI goroutine.
+	MCP func() orchestrate.MCPSummary
+	// Copy puts text on the clipboard. Nil uses tmux's buffer inside tmux,
+	// else pbcopy, wl-copy or xclip, else an OSC 52 escape.
+	Copy func(text string) error
+	// Exec runs a command in the project folder, for the MCP menu's
+	// `claude mcp add`. Nil runs it for real.
+	Exec func(name string, args ...string) (string, error)
 }
 
 type (
 	statusMsg []orchestrate.ServiceStatus
+	mcpMsg    orchestrate.MCPSummary
 	tickMsg   struct{}
 	doneMsg   struct {
 		action string
@@ -63,7 +74,11 @@ type dashboard struct {
 	// for tab.
 	now func() time.Time
 	// envs is the open env chooser, or nil.
-	envs   *envChooser
+	envs *envChooser
+	// menu is the open MCP menu, or nil.
+	menu *mcpMenu
+	// mcp is the project's MCP setup, once loaded.
+	mcp    *orchestrate.MCPSummary
 	lastIn map[bool]int
 	// actions holds each service's last background action, and nextAction
 	// numbers them.
@@ -113,7 +128,11 @@ func (m *dashboard) refresh() tea.Cmd {
 	}
 	m.loading = true
 	status := m.opts.Status
-	return func() tea.Msg { return statusMsg(status()) }
+	cmds := []tea.Cmd{func() tea.Msg { return statusMsg(status()) }}
+	if summary := m.opts.MCP; summary != nil {
+		cmds = append(cmds, func() tea.Msg { return mcpMsg(summary()) })
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m *dashboard) tick() tea.Cmd {
@@ -134,6 +153,10 @@ func (m *dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if first {
 			return m, tea.Batch(m.tick(), m.fetchPanel())
 		}
+		return m, nil
+	case mcpMsg:
+		sum := orchestrate.MCPSummary(msg)
+		m.mcp = &sum
 		return m, nil
 	case tickMsg:
 		return m, tea.Batch(m.refresh(), m.tick(), m.fetchPanel())
@@ -197,8 +220,19 @@ func (m *dashboard) key(key string) (tea.Model, tea.Cmd) {
 	if m.envs != nil {
 		return m, m.envKey(key)
 	}
+	if m.menu != nil {
+		return m, m.menuKey(key)
+	}
 	row, ok := m.current()
 	switch key {
+	case "m":
+		switch {
+		case !ok:
+		case len(row.MCP) == 0:
+			m.message = row.Name + " declares no MCP servers; add them to neptuno.yml under repos." + row.Name + ".mcp"
+		default:
+			m.menu = newMCPMenu(row)
+		}
 	case "e":
 		switch {
 		case !ok:
@@ -699,17 +733,36 @@ func (m *dashboard) details(r orchestrate.ServiceStatus) string {
 		}
 		url := labelStyle.Render("no Caddyfile site")
 		if srv.HostURL != "" {
-			url = hyperlink(proxy.Link{URL: srv.HostURL})
+			url = hyperlink(proxy.Link{URL: srv.HostURL}) + "  " + healthLabel(r, srv.ID())
 		}
 		add(label, srv.ID()+"  "+url)
 		if srv.ContainerURL != "" {
 			add("", labelStyle.Render("in containers ")+srv.ContainerURL)
 		}
 	}
+	if len(r.MCP) > 0 {
+		add("", labelStyle.Render("m to copy these or add them to Claude Code"))
+	}
 	if len(r.DependsOn) > 0 {
 		add("Depends on", strings.Join(r.DependsOn, ", "))
 	}
 	return strings.Join(lines, "\n") + "\n"
+}
+
+// healthLabel says whether an MCP server answered the last check.
+func healthLabel(r orchestrate.ServiceStatus, id string) string {
+	h, ok := r.MCPHealth[id]
+	switch {
+	case !r.Running():
+		return labelStyle.Render("stopped")
+	case !ok:
+		return labelStyle.Render("checking")
+	case h == mcp.Up:
+		return okStyle.Render("● answering")
+	case h == mcp.NotFound:
+		return warnStyle.Render("● nothing at this path")
+	}
+	return errStyle.Render("● not answering")
 }
 
 // hyperlink shows a URL as an OSC 8 link, which terminals that support it
