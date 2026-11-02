@@ -334,3 +334,19 @@ func (p *Project) ServiceAt(dir string) string {
 	}
 	return ""
 }
+
+// Stamp sums up the files Load reads, by size and modification time, so a
+// caller holding a Project can tell when to load it again. The repos folder
+// counts too, since adding or removing a repo changes its entries.
+func Stamp(root string) string {
+	var b strings.Builder
+	for _, name := range []string{"neptuno.yml", "neptuno.local.yml", "compose.yml", "compose.override.yml", "repos"} {
+		info, err := os.Stat(filepath.Join(root, name))
+		if err != nil {
+			b.WriteString(name + ":-;")
+			continue
+		}
+		fmt.Fprintf(&b, "%s:%d:%d;", name, info.Size(), info.ModTime().UnixNano())
+	}
+	return b.String()
+}

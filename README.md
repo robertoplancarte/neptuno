@@ -219,7 +219,10 @@ uncommitted changes), that commit's date and its envs, with the active one in
 brackets (`[local] staging production`), and every other compose service
 with its container state and published ports. The row under the cursor shows
 more: the commit's subject and author, each process and its state, the
-container's health and what it depends on. It refreshes every two seconds.
+container's health and what it depends on. It refreshes every two seconds,
+and loads the project again when `neptuno.yml`, `compose.yml` or `repos/`
+change, so a repo added from the dashboard or the shell shows up without
+restarting it.
 
 The screen is split into panels: the project, the repos and the services
 stacked on the left with the volumes under them, the focused list's border highlighted, and on the

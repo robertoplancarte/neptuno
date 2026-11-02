@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sync"
 
 	"github.com/mattn/go-isatty"
+	"github.com/robertoplancarte/neptuno/internal/env"
 	"github.com/robertoplancarte/neptuno/internal/orchestrate"
 	"github.com/robertoplancarte/neptuno/internal/project"
 	"github.com/robertoplancarte/neptuno/internal/stacks"
@@ -66,19 +68,50 @@ func isTerminal() bool {
 }
 
 func dashboardHere(o *orchestrate.Orchestrator) error {
+	live := newLiveOrchestrator(o)
 	return tui.RunDashboard(tui.DashboardOptions{
 		Project:       o.Project.Name,
 		Root:          o.Project.Root,
 		Session:       o.SessionName(),
 		Neptuno:       o.Neptuno,
-		Status:        o.Status,
-		Vars:          o.EnvVars,
-		Logs:          o.Logs,
-		MCP:           o.MCPSummary,
-		Volumes:       o.Volumes,
-		InspectVolume: o.InspectVolume,
+		Status:        func() []orchestrate.ServiceStatus { return live.get().Status() },
+		Vars:          func(repo string) ([]env.Var, error) { return live.get().EnvVars(repo) },
+		Logs:          func(name string) (string, error) { return live.get().Logs(name) },
+		MCP:           func() orchestrate.MCPSummary { return live.get().MCPSummary() },
+		Volumes:       func() ([]orchestrate.Volume, error) { return live.get().Volumes() },
+		InspectVolume: func(v orchestrate.Volume) (orchestrate.VolumeDetail, error) { return live.get().InspectVolume(v) },
 		Stacks:        func() ([]*stacks.Stack, error) { return stacks.List(o.Project.Path("stacks")) },
 	})
+}
+
+// liveOrchestrator hands the dashboard an orchestrator for the project as it
+// is on disk now: when neptuno.yml, compose.yml or the repos folder change,
+// such as after the dashboard adds a repo, it loads the project again, so
+// the lists show the change without restarting neptuno. The dashboard calls
+// it from several goroutines at once.
+type liveOrchestrator struct {
+	mu    sync.Mutex
+	base  orchestrate.Orchestrator
+	stamp string
+}
+
+func newLiveOrchestrator(o *orchestrate.Orchestrator) *liveOrchestrator {
+	return &liveOrchestrator{base: *o, stamp: project.Stamp(o.Project.Root)}
+}
+
+// get returns a copy of the orchestrator with the current project. A
+// project that fails to load, such as a compose.yml saved half-edited,
+// keeps the last good one until it loads again.
+func (l *liveOrchestrator) get() *orchestrate.Orchestrator {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if stamp := project.Stamp(l.base.Project.Root); stamp != l.stamp {
+		if p, err := project.Load(l.base.Project.Root); err == nil {
+			l.base.Project, l.stamp = p, stamp
+		}
+	}
+	o := l.base
+	return &o
 }
 
 func newStatusCommand() *cobra.Command {
