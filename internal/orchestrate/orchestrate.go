@@ -335,18 +335,45 @@ func (o *Orchestrator) OpenDashboard() error {
 const DashboardCommand = "dashboard"
 
 // ensureDashboard makes sure the project's session exists and its first
-// window, named neptuno, runs the dashboard. A dashboard closed with q comes
-// back before the first window, next to the others.
+// window, named neptuno, runs the dashboard, with Claude Code in a pane
+// below it. A dashboard closed with q comes back before the first window,
+// next to the others.
 func (o *Orchestrator) ensureDashboard() error {
 	p := o.Project
 	command := procfile.Quote(o.Neptuno) + " " + DashboardCommand
-	if !o.hasSession() {
-		return o.Runner.Run(p.Root, "tmux", "new-session", "-d", "-s", o.SessionName(), "-n", DashboardWindow, "-c", p.Root, command)
-	}
 	if o.hasWindow(DashboardWindow) {
 		return nil
 	}
-	return o.Runner.Run(p.Root, "tmux", "new-window", "-d", "-b", "-t", "="+o.SessionName()+":^", "-n", DashboardWindow, "-c", p.Root, command)
+	var err error
+	if !o.hasSession() {
+		err = o.Runner.Run(p.Root, "tmux", "new-session", "-d", "-s", o.SessionName(), "-n", DashboardWindow, "-c", p.Root, command)
+	} else {
+		err = o.Runner.Run(p.Root, "tmux", "new-window", "-d", "-b", "-t", "="+o.SessionName()+":^", "-n", DashboardWindow, "-c", p.Root, command)
+	}
+	if err != nil {
+		return err
+	}
+	return o.splitClaude()
+}
+
+// DashboardClaudePane is the share of the dashboard window, in percent,
+// that the Claude Code pane below the dashboard takes.
+const DashboardClaudePane = 50
+
+// splitClaude splits the dashboard window top and bottom and runs Claude
+// Code on the host in the bottom pane, in the project root, so it reads the
+// project's .mcp.json, AGENTS.md and CLAUDE.md. The dashboard keeps focus.
+// Without claude on PATH the dashboard gets the whole window.
+func (o *Orchestrator) splitClaude() error {
+	if o.Runner.LookPath("claude") != nil {
+		fmt.Fprintln(o.Log, "claude not found on PATH, so the dashboard window has no Claude Code pane.")
+		return nil
+	}
+	// Keep the pane open on failure so the error can be read.
+	command := `claude; status=$?; if [ $status -ne 0 ]; then echo; echo "claude exited with status $status. Press enter to close this pane."; read _; fi`
+	return o.Runner.Run(o.Project.Root, "tmux", "split-window", "-v", "-d",
+		"-l", fmt.Sprintf("%d%%", DashboardClaudePane),
+		"-t", o.target(DashboardWindow), "-c", o.Project.Root, command)
 }
 
 // startOvermind starts the repo's overmind as a daemon and waits for its
