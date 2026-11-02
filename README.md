@@ -264,7 +264,9 @@ command's output goes to the Logs tab of every service it acts on, which the
 right panel switches to when that includes the row under the cursor: below
 the container's output while it runs or after it fails, above it once it
 succeeds. The bottom line says when it is done or failed, and a service
-takes one command at a time.
+takes one command at a time. Starting or restarting a service (`u`, `r`, or `e` on a
+running repo) clears its Logs tab, which then shows only that run's output;
+stopping it keeps the last run's logs until it starts again.
 
 ### Adding a repo
 

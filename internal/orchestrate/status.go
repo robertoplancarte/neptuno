@@ -320,7 +320,12 @@ func (o *Orchestrator) EnvVars(repo string) ([]env.Var, error) {
 	return env.Resolver{Dir: p.Path("environments")}.Resolve(repo, st.EnvFor(repo, p.Config.DefaultEnv), nil)
 }
 
-// Logs returns the last lines a service's container printed.
-func (o *Orchestrator) Logs(service string) (string, error) {
-	return o.Runner.Output(o.Project.Root, "docker", "compose", "logs", "--no-color", "--no-log-prefix", "--tail", "300", service)
+// Logs returns the last lines a service's container printed, only those
+// since since when it is set.
+func (o *Orchestrator) Logs(service string, since time.Time) (string, error) {
+	args := []string{"compose", "logs", "--no-color", "--no-log-prefix", "--tail", "300"}
+	if !since.IsZero() {
+		args = append(args, "--since", since.UTC().Format(time.RFC3339Nano))
+	}
+	return o.Runner.Output(o.Project.Root, "docker", append(args, service)...)
 }

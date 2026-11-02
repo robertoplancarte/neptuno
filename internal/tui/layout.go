@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -46,6 +47,10 @@ func (m *dashboard) panelKey() string {
 	if !ok || m.tab == tabInfo || m.tab == tabActions {
 		return ""
 	}
+	if m.tab == tabLogs {
+		// A fetch from before a restart cleared the tab is stale.
+		return fmt.Sprintf("%d:%s:%s:%d", m.tab, r.Name, r.Env, m.logsSince[r.Name].UnixNano())
+	}
 	return fmt.Sprintf("%d:%s:%s", m.tab, r.Name, r.Env)
 }
 
@@ -67,8 +72,8 @@ func (m *dashboard) fetchPanel() tea.Cmd {
 		vars := m.opts.Vars
 		return func() tea.Msg { return panelMsg{key, envText(r, vars)} }
 	default:
-		logs := m.opts.Logs
-		return func() tea.Msg { return panelMsg{key, logsText(r, logs)} }
+		logs, since := m.opts.Logs, m.logsSince[r.Name]
+		return func() tea.Msg { return panelMsg{key, logsText(r, logs, since)} }
 	}
 }
 
@@ -98,14 +103,14 @@ func envText(r orchestrate.ServiceStatus, vars func(string) ([]env.Var, error)) 
 	return strings.Join(lines, "\n")
 }
 
-func logsText(r orchestrate.ServiceStatus, logs func(string) (string, error)) string {
+func logsText(r orchestrate.ServiceStatus, logs func(string, time.Time) (string, error), since time.Time) string {
 	if r.Repo && r.RunMode == "host" {
 		return r.Name + " runs on the host, outside docker.\nPress enter to open its window, which shows each process's output."
 	}
 	if logs == nil {
 		return ""
 	}
-	out, err := logs(r.Name)
+	out, err := logs(r.Name, since)
 	if err != nil {
 		return errStyle.Render(err.Error())
 	}

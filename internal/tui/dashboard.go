@@ -32,8 +32,9 @@ type DashboardOptions struct {
 	Refresh time.Duration
 	// Vars resolves a repo's env, for the Env tab.
 	Vars func(repo string) ([]env.Var, error)
-	// Logs returns a service's recent container output, for the Logs tab.
-	Logs func(name string) (string, error)
+	// Logs returns a service's recent container output, for the Logs tab:
+	// only what it printed since since, when that is set.
+	Logs func(name string, since time.Time) (string, error)
 	// MCP reports how far the project's MCP servers are set up, for the
 	// project panel. It runs off the UI goroutine.
 	MCP func() orchestrate.MCPSummary
@@ -92,6 +93,9 @@ type dashboard struct {
 	// numbers them.
 	actions    map[string]*action
 	nextAction int
+	// logsSince is when each service last started or restarted from here;
+	// its Logs tab shows only container output from then on.
+	logsSince map[string]time.Time
 	// volumes are the project's named volumes once loaded, which the
 	// cursor reaches after the services, and confirm the one waiting for a
 	// y to be cleared.
@@ -126,7 +130,7 @@ func newDashboard(opts DashboardOptions) *dashboard {
 	if opts.Refresh == 0 {
 		opts.Refresh = 2 * time.Second
 	}
-	return &dashboard{opts: opts, selected: map[string]bool{}, now: time.Now, lastIn: map[int]int{}, actions: map[string]*action{}}
+	return &dashboard{opts: opts, selected: map[string]bool{}, now: time.Now, lastIn: map[int]int{}, actions: map[string]*action{}, logsSince: map[string]time.Time{}}
 }
 
 // RunDashboard shows the interactive dashboard until the user quits.
