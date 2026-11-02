@@ -47,8 +47,10 @@ func TestParseComposeVolumes(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Volume{
-		{Name: "api_bundle", Docker: "acme_api_bundle", Services: []string{"api", "web"}},
-		{Name: "postgres_data", Docker: "acme_postgres_data", Services: []string{"postgres"}},
+		{Name: "api_bundle", Docker: "acme_api_bundle", Services: []string{"api", "web"},
+			Mounts: []Mount{{"api", "/usr/local/bundle"}, {"web", "/usr/local/bundle"}}},
+		{Name: "postgres_data", Docker: "acme_postgres_data", Services: []string{"postgres"},
+			Mounts: []Mount{{"postgres", "/var/lib/postgresql/data"}}},
 		{Name: "shared", Docker: "shared", External: true},
 	}
 	if !reflect.DeepEqual(vols, want) {
@@ -120,5 +122,47 @@ func TestResetVolumeRefuses(t *testing.T) {
 	}
 	if len(f.cmds) != 0 {
 		t.Errorf("ran %v", f.cmds)
+	}
+}
+
+func TestInspectVolume(t *testing.T) {
+	o, f := setup(t)
+	r := volumeRunner{f, map[string]string{
+		"docker volume inspect":           `{"Driver":"local","Mountpoint":"/var/lib/docker/volumes/acme_postgres_data/_data","CreatedAt":"2026-10-30T12:00:00Z"}`,
+		"docker compose ps --all":         `{"Service":"postgres","State":"running"}`,
+		"docker compose exec -T postgres": "48.2M\nbase/\nglobal/\nPG_VERSION\n",
+	}}
+	o.Runner = r
+	v := Volume{Name: "postgres_data", Docker: "acme_postgres_data", Exists: true, Services: []string{"postgres"},
+		Mounts: []Mount{{"postgres", "/var/lib/postgresql/data"}}}
+	d, err := o.InspectVolume(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Driver != "local" || d.Size != "48.2M" || !reflect.DeepEqual(d.Entries, []string{"base/", "global/", "PG_VERSION"}) ||
+		!strings.Contains(d.Via, "running postgres container") || d.Created.IsZero() {
+		t.Errorf("detail: %+v", d)
+	}
+
+	// With postgres stopped, a throwaway container looks instead.
+	delete(r.outputs, "docker compose ps --all")
+	delete(r.outputs, "docker compose exec -T postgres")
+	r.outputs["docker run --rm -v acme_postgres_data:/volume:ro busybox"] = "8.0K\n"
+	if d, err = o.InspectVolume(v); err != nil || d.Size != "8.0K" || len(d.Entries) != 0 || !strings.Contains(d.Via, "throwaway") {
+		t.Errorf("detail with postgres stopped: %+v, %v", d, err)
+	}
+
+	if d, err := o.InspectVolume(Volume{Docker: "acme_new"}); err != nil || d.Size != "" {
+		t.Errorf("a volume docker hasn't created: %+v, %v", d, err)
+	}
+}
+
+func TestParsePeekCapsEntries(t *testing.T) {
+	out := "1.0M"
+	for i := 0; i < maxEntries+5; i++ {
+		out += "\nfile"
+	}
+	if size, entries, more := parsePeek(out); size != "1.0M" || len(entries) != maxEntries || more != 5 {
+		t.Errorf("parsePeek: %q, %d entries, %d more", size, len(entries), more)
 	}
 }

@@ -66,15 +66,16 @@ func isTerminal() bool {
 
 func dashboardHere(o *orchestrate.Orchestrator) error {
 	return tui.RunDashboard(tui.DashboardOptions{
-		Project: o.Project.Name,
-		Root:    o.Project.Root,
-		Session: o.SessionName(),
-		Neptuno: o.Neptuno,
-		Status:  o.Status,
-		Vars:    o.EnvVars,
-		Logs:    o.Logs,
-		MCP:     o.MCPSummary,
-		Volumes: o.Volumes,
+		Project:       o.Project.Name,
+		Root:          o.Project.Root,
+		Session:       o.SessionName(),
+		Neptuno:       o.Neptuno,
+		Status:        o.Status,
+		Vars:          o.EnvVars,
+		Logs:          o.Logs,
+		MCP:           o.MCPSummary,
+		Volumes:       o.Volumes,
+		InspectVolume: o.InspectVolume,
 	})
 }
 

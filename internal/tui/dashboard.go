@@ -36,9 +36,11 @@ type DashboardOptions struct {
 	// MCP reports how far the project's MCP servers are set up, for the
 	// project panel. It runs off the UI goroutine.
 	MCP func() orchestrate.MCPSummary
-	// Volumes lists the project's named volumes, for the volumes view. It
+	// Volumes lists the project's named volumes, for the Volumes list. It
 	// runs off the UI goroutine.
 	Volumes func() ([]orchestrate.Volume, error)
+	// InspectVolume looks inside a volume, for its panel.
+	InspectVolume func(orchestrate.Volume) (orchestrate.VolumeDetail, error)
 	// Copy puts text on the clipboard. Nil uses tmux's buffer inside tmux,
 	// else pbcopy, wl-copy or xclip, else an OSC 52 escape.
 	Copy func(text string) error
@@ -73,8 +75,8 @@ type dashboard struct {
 	tab    int
 	scroll int
 	panel  panelMsg
-	// lastIn remembers the cursor in the repos (true) and services lists,
-	// for tab.
+	// lastIn remembers the cursor in each left-hand list, by section, for
+	// tab.
 	now func() time.Time
 	// envs is the open env chooser, or nil.
 	envs *envChooser
@@ -82,17 +84,17 @@ type dashboard struct {
 	menu *mcpMenu
 	// mcp is the project's MCP setup, once loaded.
 	mcp    *orchestrate.MCPSummary
-	lastIn map[bool]int
+	lastIn map[int]int
 	// actions holds each service's last background action, and nextAction
 	// numbers them.
 	actions    map[string]*action
 	nextAction int
-	// volumes are the project's named volumes once loaded, and vols the
-	// open volumes view, or nil.
-	volumes       []orchestrate.Volume
-	volumesErr    error
-	volumesLoaded bool
-	vols          *volumeView
+	// volumes are the project's named volumes once loaded, which the
+	// cursor reaches after the services, and confirm the one waiting for a
+	// y to be cleared.
+	volumes    []orchestrate.Volume
+	volumesErr error
+	confirm    string
 }
 
 // envChooser picks the configuration a repo runs with.
@@ -113,7 +115,7 @@ func newDashboard(opts DashboardOptions) *dashboard {
 	if opts.Refresh == 0 {
 		opts.Refresh = 2 * time.Second
 	}
-	return &dashboard{opts: opts, selected: map[string]bool{}, now: time.Now, lastIn: map[bool]int{}, actions: map[string]*action{}}
+	return &dashboard{opts: opts, selected: map[string]bool{}, now: time.Now, lastIn: map[int]int{}, actions: map[string]*action{}}
 }
 
 // RunDashboard shows the interactive dashboard until the user quits.
@@ -129,7 +131,7 @@ func RenderStatus(rows []orchestrate.ServiceStatus) string {
 	return d.table()
 }
 
-func (m *dashboard) Init() tea.Cmd { return tea.Batch(m.refresh(), m.loadVolumes()) }
+func (m *dashboard) Init() tea.Cmd { return m.refresh() }
 
 func (m *dashboard) refresh() tea.Cmd {
 	if m.loading || m.opts.Status == nil {
@@ -137,7 +139,7 @@ func (m *dashboard) refresh() tea.Cmd {
 	}
 	m.loading = true
 	status := m.opts.Status
-	cmds := []tea.Cmd{func() tea.Msg { return statusMsg(status()) }}
+	cmds := []tea.Cmd{func() tea.Msg { return statusMsg(status()) }, m.loadVolumes()}
 	if summary := m.opts.MCP; summary != nil {
 		cmds = append(cmds, func() tea.Msg { return mcpMsg(summary()) })
 	}
@@ -153,12 +155,7 @@ func (m *dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statusMsg:
 		first := !m.loaded
 		m.rows, m.loaded, m.loading, m.updated = msg, true, false, m.now()
-		if m.cursor >= len(m.rows) {
-			m.cursor = len(m.rows) - 1
-		}
-		if m.cursor < 0 {
-			m.cursor = 0
-		}
+		m.clampCursor()
 		if first {
 			return m, tea.Batch(m.tick(), m.fetchPanel())
 		}
@@ -168,16 +165,24 @@ func (m *dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mcp = &sum
 		return m, nil
 	case tickMsg:
-		return m, tea.Batch(m.refresh(), m.tick(), m.fetchPanel())
+		// Looking inside a volume can take a while, so its panel loads once
+		// per visit, and again after it is cleared.
+		panel := m.fetchPanel()
+		if _, onVolume := m.currentVolume(); onVolume && m.panel.key == m.panelKey() {
+			panel = nil
+		}
+		return m, tea.Batch(m.refresh(), m.tick(), panel)
 	case panelMsg:
 		if msg.key == m.panelKey() {
 			m.panel = msg
 		}
 		return m, nil
 	case volumesMsg:
-		m.volumes, m.volumesErr, m.volumesLoaded = msg.list, msg.err, true
-		if m.vols != nil && m.vols.cursor >= len(m.volumes) {
-			m.vols.cursor = max(0, len(m.volumes)-1)
+		_, wasOn := m.currentVolume()
+		m.volumes, m.volumesErr = msg.list, msg.err
+		m.clampCursor()
+		if _, on := m.currentVolume(); on && !wasOn {
+			return m, m.fetchPanel()
 		}
 		return m, nil
 	case actionMsg:
@@ -197,14 +202,19 @@ func (m *dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		model, cmd := m.key(msg.String())
 		if m.cursor != cursor || m.tab != tab {
 			m.scroll = 0
-			if r, ok := m.current(); ok {
-				m.lastIn[r.Repo] = m.cursor
+			if m.cursor < m.total() {
+				m.lastIn[m.section(m.cursor)] = m.cursor
 			}
 			cmd = tea.Batch(cmd, m.fetchPanel())
 		}
 		return model, cmd
 	}
 	return m, nil
+}
+
+// clampCursor keeps the cursor on a row after the lists change.
+func (m *dashboard) clampCursor() {
+	m.cursor = max(0, min(m.cursor, m.total()-1))
 }
 
 func (m *dashboard) current() (orchestrate.ServiceStatus, bool) {
@@ -238,24 +248,14 @@ func (m *dashboard) key(key string) (tea.Model, tea.Cmd) {
 	if m.menu != nil {
 		return m, m.menuKey(key)
 	}
-	if m.vols != nil {
-		return m, m.volumeKey(key)
+	if v, onVolume := m.currentVolume(); onVolume {
+		if cmd, handled := m.volumeKey(v, key); handled {
+			return m, cmd
+		}
 	}
+	m.confirm = ""
 	row, ok := m.current()
 	switch key {
-	case "v":
-		m.vols = &volumeView{}
-		// Start on the volume of the row under the cursor, if it has one.
-		if ok {
-			if names := m.volumesFor(row.Name); len(names) > 0 {
-				for i, v := range m.volumes {
-					if v.Name == names[0] {
-						m.vols.cursor = i
-					}
-				}
-			}
-		}
-		return m, m.loadVolumes()
 	case "m":
 		switch {
 		case !ok:
@@ -280,18 +280,12 @@ func (m *dashboard) key(key string) (tea.Model, tea.Cmd) {
 	case "q", "esc", "ctrl+c":
 		return m, tea.Quit
 	case "tab", "shift+tab":
-		// Jump between the repos and services lists, where it last was.
-		inRepos := ok && row.Repo
-		if i, seen := m.lastIn[!inRepos]; seen && i < len(m.rows) && m.rows[i].Repo == !inRepos {
-			m.cursor = i
-			break
+		// Jump to the next list that has rows, where it last was.
+		step := 1
+		if key == "shift+tab" {
+			step = 2
 		}
-		for i, r := range m.rows {
-			if r.Repo == !inRepos {
-				m.cursor = i
-				break
-			}
-		}
+		m.jumpSection((m.section(m.cursor) + step) % 3)
 	case "]", "right", "l":
 		m.tab = (m.tab + 1) % len(tabNames)
 	case "[", "left", "h":
@@ -308,7 +302,7 @@ func (m *dashboard) key(key string) (tea.Model, tea.Cmd) {
 			m.cursor--
 		}
 	case "down", "j":
-		if m.cursor < len(m.rows)-1 {
+		if m.cursor < m.total()-1 {
 			m.cursor++
 		}
 	case " ", "x":
@@ -470,21 +464,21 @@ func (m *dashboard) compactView() string {
 	b.WriteString(m.table())
 	if m.envs != nil {
 		b.WriteString("\n" + m.envView())
-	} else if m.vols != nil {
-		b.WriteString("\n" + m.volumeView())
+	} else if v, ok := m.currentVolume(); ok {
+		b.WriteString("\n" + m.volumePanel(v, max(40, m.width)) + "\n")
 	} else if r, ok := m.current(); ok {
 		b.WriteString("\n" + m.details(r))
 	}
 	if m.message != "" {
 		b.WriteString("\n" + m.message + "\n")
 	}
-	help := "↑↓ move · space select · enter open window · u up · s stop · r restart · e env · v volumes · c claude · f refresh · q quit"
+	help := "↑↓ move · space select · enter open window · u up · s stop · r restart · e env · c claude · f refresh · q quit"
 	if m.envs != nil {
 		help = "↑↓ move · enter switch · esc cancel"
 	}
-	if m.vols != nil {
-		help = "↑↓ move · enter reset · esc close"
-		if m.vols.confirm {
+	if _, ok := m.currentVolume(); ok {
+		help = "↑↓ move · enter clear · tab next list · q quit"
+		if m.confirm != "" {
 			help = "y delete · any other key cancels"
 		}
 	}
@@ -551,7 +545,43 @@ func (m *dashboard) table() string {
 		b.WriteString("\n")
 	}
 	write(svcHead, svcs, svcIdx)
+	if len(m.volumes) > 0 {
+		head := []string{"VOLUME", "STATE", "USED BY"}
+		cells := [][]string{head}
+		for _, v := range m.volumes {
+			cells = append(cells, m.volumeCells(v))
+		}
+		vw := columnWidths(cells)
+		b.WriteString("\n    " + headerStyle.Render(formatRow(head, vw)) + "\n")
+		for j, c := range cells[1:] {
+			line := formatRow(c, vw)
+			line = strings.Replace(line, c[1], volumeStyleFor(c[1])(c[1]), 1)
+			if len(m.rows)+j == m.cursor {
+				b.WriteString(cursorStyle.Render("> ") + "  " + line + "\n")
+			} else {
+				b.WriteString("    " + line + "\n")
+			}
+		}
+	}
 	return b.String()
+}
+
+// jumpSection moves the cursor to the list in section s, or the next one
+// after it that has rows, where the cursor last was in it.
+func (m *dashboard) jumpSection(s int) {
+	for range 3 {
+		if i, seen := m.lastIn[s]; seen && i < m.total() && m.section(i) == s {
+			m.cursor = i
+			return
+		}
+		for i := 0; i < m.total(); i++ {
+			if m.section(i) == s {
+				m.cursor = i
+				return
+			}
+		}
+		s = (s + 1) % 3
+	}
 }
 
 func (m *dashboard) repoCells(r orchestrate.ServiceStatus) []string {
@@ -786,7 +816,7 @@ func (m *dashboard) details(r orchestrate.ServiceStatus) string {
 		add("Depends on", strings.Join(r.DependsOn, ", "))
 	}
 	if vols := m.volumesFor(r.Name); len(vols) > 0 {
-		add("Volumes", strings.Join(vols, ", ")+labelStyle.Render("  (v to reset)"))
+		add("Volumes", strings.Join(vols, ", ")+labelStyle.Render("  (in the Volumes list)"))
 	}
 	return strings.Join(lines, "\n") + "\n"
 }

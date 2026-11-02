@@ -95,7 +95,7 @@ The `rails` stack keeps installed gems in a `<repo>_bundle` named volume at
 entrypoint's `bundle check || bundle install` only installs when
 `Gemfile.lock` changes. Named volumes live inside Docker's VM, so they run at
 native speed on a Mac. To start one over, say for a clean `bundle install`,
-press `v` in the dashboard or run `neptuno volumes reset <repo>_bundle` (see
+select it in the dashboard's Volumes list and press `enter`, or run `neptuno volumes reset <repo>_bundle` (see
 [Volumes](#volumes)).
 
 ### Stack options
@@ -222,7 +222,7 @@ more: the commit's subject and author, each process and its state, the
 container's health and what it depends on. It refreshes every two seconds.
 
 The screen is split into panels: the project, the repos and the services
-stacked on the left, with the focused list's border highlighted, and on the
+stacked on the left with the volumes under them, the focused list's border highlighted, and on the
 right a panel for the row under the cursor with three tabs. **Info** has the
 details above plus the URLs the row answers on through the proxy, read from
 the Caddyfile's sites; terminals with OSC 8 hyperlinks make them clickable
@@ -235,7 +235,7 @@ falls back to a plain list.
 | Key | Does |
 | --- | --- |
 | `↑` `↓` / `j` `k` | move |
-| `tab` | jump between the repos and services lists |
+| `tab` | jump between the repos, services and volumes lists |
 | `[` `]` / `←` `→` | switch the right panel's tab |
 | `PgUp` `PgDn` / `ctrl+u` `ctrl+d` | scroll the right panel |
 | `space` | select rows; `a` selects all |
@@ -246,7 +246,6 @@ falls back to a plain list.
 | `e` | switch a repo's env, then restart it if it is running |
 | `c` | open Claude Code in a repo's container |
 | `m` | copy a repo's MCP URLs, or add its servers to Claude Code |
-| `v` | list the project's volumes and reset one |
 | `q` | quit |
 
 A repo's envs are the `<name>.env` files in `environments/_shared` and
@@ -264,20 +263,29 @@ takes one command at a time.
 
 ### Volumes
 
-`v` lists the named volumes in `compose.yml` (as `docker compose config`
-resolves them), the services that mount each and whether docker has created
-it yet; the Info tab names the ones the row under the cursor mounts. `enter`
-resets the one under the cursor after you confirm with `y`, since its data
-is gone for good: Neptuno stops the services that mount it and removes their
-containers, which hold on to it, deletes it, then starts again the ones that
-were running, which recreates it empty. Resetting `postgres_data` gives
-postgres a new, empty database, and a Rails app's `<repo>_bundle` volume
-gets its gems reinstalled by the entrypoint. The reset runs in the
-background like `u`, and its output goes to the Logs tab of those services
-and under the list. External volumes are left alone.
+The **Volumes** list, under the services, has the named volumes in
+`compose.yml` (as `docker compose config` resolves them), whether docker has
+created each and the services that mount it; a service's Info tab names the
+ones it mounts. With the cursor on a volume, the right panel says what it
+holds (a database, installed gems, npm packages and so on), where each
+service mounts it and whether that service is up, docker's driver, creation
+time and host path, and how much space it takes and its top-level files and
+folders. To see inside, Neptuno runs `du` and `ls` in a running container
+that mounts it, or else in a throwaway `busybox` container that mounts it
+read-only (docker pulls the image the first time). It looks once when you
+select the volume; `f` looks again.
 
-From the shell, `neptuno volumes` prints the same list and
-`neptuno volumes reset <volume>...` does the same reset, asking first unless
+`enter` clears the volume after you confirm with `y`, since its data is gone
+for good: Neptuno stops the services that mount it and removes their
+containers, which hold on to it, deletes it, then starts again the ones that
+were running, which recreates it empty. Clearing the postgres volume gives
+postgres a new, empty database, and a Rails app's `<repo>_bundle` volume gets
+its gems reinstalled by the entrypoint. It runs in the background like `u`,
+and its output goes to the Logs tab of those services and to the volume's
+panel. External volumes are left alone.
+
+From the shell, `neptuno volumes` prints the list and
+`neptuno volumes reset <volume>...` does the same clear, asking first unless
 you pass `--yes`.
 
 `neptuno up` makes the dashboard the first window of the session too, so

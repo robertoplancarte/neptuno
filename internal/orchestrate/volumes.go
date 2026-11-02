@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Volume is a named volume of the project's compose file.
@@ -19,8 +20,17 @@ type Volume struct {
 	External bool
 	// Services are the services that mount it, sorted.
 	Services []string
+	// Mounts are where each of them mounts it, in the same order.
+	Mounts []Mount
 	// Exists is true when docker has the volume.
 	Exists bool
+}
+
+// Mount is where a service mounts a volume.
+type Mount struct {
+	Service string
+	// Target is the path inside the service's container.
+	Target string
 }
 
 // composeConfig is the part of `docker compose config --format json` that
@@ -30,6 +40,7 @@ type composeConfig struct {
 		Volumes []struct {
 			Type   string `json:"type"`
 			Source string `json:"source"`
+			Target string `json:"target"`
 		} `json:"volumes"`
 	} `json:"services"`
 	Volumes map[string]struct {
@@ -74,22 +85,30 @@ func parseComposeVolumes(out string) ([]Volume, error) {
 	if err := json.Unmarshal([]byte(out), &cf); err != nil {
 		return nil, fmt.Errorf("reading docker compose config: %w", err)
 	}
-	users := map[string][]string{}
+	mounts := map[string][]Mount{}
 	for svc, def := range cf.Services {
 		for _, v := range def.Volumes {
 			// Anonymous volumes have no source and belong to one container.
-			if v.Type == "volume" && v.Source != "" && !slices.Contains(users[v.Source], svc) {
-				users[v.Source] = append(users[v.Source], svc)
+			if v.Type == "volume" && v.Source != "" {
+				mounts[v.Source] = append(mounts[v.Source], Mount{Service: svc, Target: v.Target})
 			}
 		}
 	}
 	var vols []Volume
 	for name, def := range cf.Volumes {
-		v := Volume{Name: name, Docker: def.Name, External: def.External, Services: users[name]}
+		v := Volume{Name: name, Docker: def.Name, External: def.External, Mounts: mounts[name]}
 		if v.Docker == "" {
 			v.Docker = name
 		}
-		sort.Strings(v.Services)
+		sort.Slice(v.Mounts, func(i, j int) bool {
+			a, b := v.Mounts[i], v.Mounts[j]
+			return a.Service < b.Service || a.Service == b.Service && a.Target < b.Target
+		})
+		for _, m := range v.Mounts {
+			if !slices.Contains(v.Services, m.Service) {
+				v.Services = append(v.Services, m.Service)
+			}
+		}
 		vols = append(vols, v)
 	}
 	sort.Slice(vols, func(i, j int) bool { return vols[i].Name < vols[j].Name })
@@ -166,4 +185,89 @@ func (o *Orchestrator) ResetVolume(name string) error {
 	}
 	fmt.Fprintf(o.Log, "Starting %s again, which recreates %s\n", strings.Join(running, ", "), v.Name)
 	return o.Up(UpOptions{Selected: running, Detach: true})
+}
+
+// VolumeDetail is what docker knows about a volume and what is in it.
+type VolumeDetail struct {
+	// Driver, Mountpoint and Created come from `docker volume inspect`.
+	// The mountpoint is inside Docker's VM on a Mac.
+	Driver, Mountpoint string
+	Created            time.Time
+	// Size is its disk usage as du prints it, such as 48M.
+	Size string
+	// Entries are its top-level files and folders, folders ending in /,
+	// and More counts the ones left out.
+	Entries []string
+	More    int
+	// Via says where it was looked at: in which running container, or in
+	// a throwaway one.
+	Via string
+}
+
+// maxEntries caps how many of a volume's top-level entries are listed.
+const maxEntries = 30
+
+// peekScript prints the disk usage of the folder in $1, then its top-level
+// entries, folders marked with a slash.
+const peekScript = `cd "$1" && du -sh . 2>/dev/null | cut -f1 && ls -A1p`
+
+// InspectVolume looks inside a volume: its size and top-level entries. It
+// runs du and ls in a running container that mounts it, or else in a
+// throwaway busybox container that mounts it read-only.
+func (o *Orchestrator) InspectVolume(v Volume) (VolumeDetail, error) {
+	root := o.Project.Root
+	var d VolumeDetail
+	if !v.Exists {
+		return d, nil
+	}
+	if out, err := o.Runner.Output(root, "docker", "volume", "inspect", "--format", "{{json .}}", v.Docker); err == nil {
+		var info struct {
+			Driver     string `json:"Driver"`
+			Mountpoint string `json:"Mountpoint"`
+			CreatedAt  string `json:"CreatedAt"`
+		}
+		if json.Unmarshal([]byte(out), &info) == nil {
+			d.Driver, d.Mountpoint = info.Driver, info.Mountpoint
+			d.Created, _ = time.Parse(time.RFC3339, info.CreatedAt)
+		}
+	}
+	containers := o.composeContainers()
+	out, ran := "", false
+	for _, m := range v.Mounts {
+		if containers[m.Service].State != "running" {
+			continue
+		}
+		var err error
+		if out, err = o.Runner.Output(root, "docker", "compose", "exec", "-T", m.Service, "sh", "-c", peekScript, "sh", m.Target); err == nil {
+			d.Via, ran = "inside the running "+m.Service+" container, at "+m.Target, true
+			break
+		}
+	}
+	if !ran {
+		var err error
+		out, err = o.Runner.Output(root, "docker", "run", "--rm", "-v", v.Docker+":/volume:ro", "busybox", "sh", "-c", peekScript, "sh", "/volume")
+		if err != nil {
+			return d, fmt.Errorf("looking inside %s: %w", v.Docker, err)
+		}
+		d.Via = "in a throwaway busybox container"
+	}
+	d.Size, d.Entries, d.More = parsePeek(out)
+	return d, nil
+}
+
+// parsePeek reads peekScript's output.
+func parsePeek(out string) (size string, entries []string, more int) {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	size = strings.TrimSpace(lines[0])
+	for _, l := range lines[1:] {
+		if l = strings.TrimSpace(l); l == "" {
+			continue
+		}
+		if len(entries) == maxEntries {
+			more++
+			continue
+		}
+		entries = append(entries, l)
+	}
+	return size, entries, more
 }
