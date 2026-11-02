@@ -127,7 +127,7 @@ func TestExtendsBuiltinOfSameName(t *testing.T) {
 	if out, _ := s.Render("Procfile", Data{}); !strings.Contains(string(out), "tailwindcss:watch") {
 		t.Errorf("own Procfile not used: %s", out)
 	}
-	if out, err := s.Render("Dockerfile", Data{Name: "shop"}); err != nil || !strings.Contains(string(out), "FROM ruby:3.3") {
+	if out, err := s.Render("Dockerfile", Data{Name: "shop"}); err != nil || !strings.Contains(string(out), "FROM ruby:4.0") {
 		t.Errorf("Dockerfile not inherited: %v %s", err, out)
 	}
 }
