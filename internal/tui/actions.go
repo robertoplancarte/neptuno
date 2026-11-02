@@ -190,7 +190,12 @@ func (m *dashboard) handleAction(msg actionMsg) tea.Cmd {
 	} else {
 		m.message = name + " done"
 	}
-	return tea.Batch(m.refresh(), m.loadVolumes())
+	// Look inside a cleared volume again.
+	if _, ok := m.currentVolume(); ok {
+		m.panel = panelMsg{}
+		return tea.Batch(m.refresh(), m.fetchPanel())
+	}
+	return m.refresh()
 }
 
 // actionText is a service's last action and its output, for the Logs tab.

@@ -38,6 +38,9 @@ type panelMsg struct {
 // panelKey names what the right panel's Env or Logs tab shows now, so a
 // late answer for another row or tab is dropped.
 func (m *dashboard) panelKey() string {
+	if v, ok := m.currentVolume(); ok {
+		return fmt.Sprintf("volume:%s:%t", v.Name, v.Exists)
+	}
 	r, ok := m.current()
 	if !ok || m.tab == tabInfo {
 		return ""
@@ -49,9 +52,16 @@ func (m *dashboard) panelKey() string {
 func (m *dashboard) fetchPanel() tea.Cmd {
 	key := m.panelKey()
 	r, _ := m.current()
+	v, onVolume := m.currentVolume()
 	switch {
 	case key == "":
 		return nil
+	case onVolume:
+		if !v.Exists {
+			return nil
+		}
+		inspect := m.opts.InspectVolume
+		return func() tea.Msg { return panelMsg{key, volumeDetailText(v, inspect)} }
 	case m.tab == tabEnv:
 		vars := m.opts.Vars
 		return func() tea.Msg { return panelMsg{key, envText(r, vars)} }
@@ -124,27 +134,30 @@ func (m *dashboard) layoutView() string {
 	projectLines := m.projectLines()
 	projectH := len(projectLines) + 2
 	rest := bodyH - projectH
-	inRepos := false
-	if r, ok := m.current(); ok {
-		inRepos = r.Repo
+	focus := m.section(m.cursor)
+	counts := []int{len(repos), len(svcs), len(m.volumes)}
+	// The focused list takes the room the others don't need.
+	heights := make([]int, 3)
+	used := 0
+	for s, n := range counts {
+		if s != focus {
+			heights[s] = min(max(n+2, 3), max(3, rest/4))
+			used += heights[s]
+		}
 	}
-	// The focused list takes the room the other doesn't need.
-	other := len(svcs)
-	if !inRepos {
-		other = len(repos)
-	}
-	otherH := min(max(other+2, 3), max(3, rest/3))
-	repoH, svcH := rest-otherH, otherH
-	if !inRepos {
-		repoH, svcH = otherH, rest-otherH
-	}
+	heights[focus] = rest - used
 
 	left := lipgloss.JoinVertical(lipgloss.Left,
 		box("Project", projectLines, leftW, projectH, false),
-		box(fmt.Sprintf("Repos %d", len(repos)), m.listLines(repos, repoH-2, leftW-2), leftW, repoH, inRepos),
-		box(fmt.Sprintf("Services %d", len(svcs)), m.listLines(svcs, svcH-2, leftW-2), leftW, svcH, !inRepos),
+		box(fmt.Sprintf("Repos %d", len(repos)), m.listLines(repos, heights[0]-2, leftW-2), leftW, heights[0], focus == sectionRepos),
+		box(fmt.Sprintf("Services %d", len(svcs)), m.listLines(svcs, heights[1]-2, leftW-2), leftW, heights[1], focus == sectionServices),
+		box(fmt.Sprintf("Volumes %d", len(m.volumes)), m.volumeLines(heights[2]-2, leftW-2), leftW, heights[2], focus == sectionVolumes),
 	)
-	right := box(m.tabTitle(), m.rightLines(bodyH-2, rightW-2), rightW, bodyH, false)
+	title := m.tabTitle()
+	if v, ok := m.currentVolume(); ok {
+		title = volumeTitle(v)
+	}
+	right := box(title, m.rightLines(bodyH-2, rightW-2), rightW, bodyH, false)
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, right) + "\n" + m.keyBar(width)
 }
 
@@ -163,9 +176,6 @@ func (m *dashboard) projectLines() []string {
 	lines := []string{line, labelStyle.Render(m.opts.Session + " · " + updated)}
 	if l := m.mcpLine(); l != "" {
 		lines = append(lines, l)
-	}
-	if n := len(m.volumes); n > 0 {
-		lines = append(lines, labelStyle.Render(fmt.Sprintf("%d volumes (v to manage)", n)))
 	}
 	return lines
 }
@@ -225,6 +235,37 @@ func (m *dashboard) listLines(idx []int, height, width int) []string {
 	return lines
 }
 
+// volumeLines renders the Volumes list, scrolled so the cursor shows.
+func (m *dashboard) volumeLines(height, width int) []string {
+	switch {
+	case m.volumesErr != nil:
+		return []string{errStyle.Render(m.volumesErr.Error())}
+	case len(m.volumes) == 0:
+		return []string{labelStyle.Render("none")}
+	}
+	cells := make([][]string, len(m.volumes))
+	for i, v := range m.volumes {
+		cells[i] = m.volumeCells(v)
+	}
+	widths := columnWidths(cells)
+	start := 0
+	if j := m.cursor - len(m.rows); j >= height {
+		start = j - height + 1
+	}
+	var lines []string
+	for j := start; j < len(cells) && len(lines) < height; j++ {
+		plain := "  " + formatRow(cells[j], widths)
+		if len(m.rows)+j == m.cursor {
+			plain = ansi.Truncate(plain, width, "…")
+			lines = append(lines, selectedRow.Render(plain+strings.Repeat(" ", max(0, width-lipgloss.Width(plain)))))
+			continue
+		}
+		state := cells[j][1]
+		lines = append(lines, strings.Replace(plain, state, volumeStyleFor(state)(state), 1))
+	}
+	return lines
+}
+
 // listCells is a row's columns in the left panels.
 func (m *dashboard) listCells(r orchestrate.ServiceStatus) []string {
 	cells := []string{r.Name, stateLabel(r)}
@@ -266,10 +307,11 @@ func (m *dashboard) rightLines(height, width int) []string {
 		text = m.envView()
 	case m.menu != nil:
 		text = m.menuView()
-	case m.vols != nil:
-		text = m.volumeView()
 	case !ok:
 		text = "compose.yml has no services yet; add a repo with `neptuno add`."
+		if v, onVolume := m.currentVolume(); onVolume {
+			text = m.volumePanel(v, width)
+		}
 	case m.tab == tabInfo:
 		text = m.details(r)
 	case m.panel.key != m.panelKey():
@@ -284,7 +326,7 @@ func (m *dashboard) rightLines(height, width int) []string {
 	}
 	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
 	// Logs follow the end, like tail -f, unless scrolled up.
-	if m.tab == tabLogs && m.envs == nil && m.menu == nil && m.vols == nil {
+	if m.tab == tabLogs && m.envs == nil && m.menu == nil && ok {
 		end := max(0, len(lines)-height-m.scroll)
 		m.scroll = min(m.scroll, max(0, len(lines)-height))
 		lines = lines[end:]
@@ -303,17 +345,17 @@ func (m *dashboard) rightLines(height, width int) []string {
 
 func (m *dashboard) keyBar(width int) string {
 	keys := [][2]string{{"enter", "open"}, {"u", "up"}, {"s", "stop"}, {"r", "restart"}, {"e", "env"},
-		{"c", "claude"}, {"m", "mcp"}, {"v", "volumes"}, {"space", "select"}, {"tab", "panel"}, {"[ ]", "tab"}, {"q", "quit"}}
+		{"c", "claude"}, {"m", "mcp"}, {"space", "select"}, {"tab", "panel"}, {"[ ]", "tab"}, {"q", "quit"}}
 	if m.envs != nil {
 		keys = [][2]string{{"↑↓", "choose"}, {"enter", "switch"}, {"esc", "cancel"}}
 	}
 	if m.menu != nil {
 		keys = [][2]string{{"↑↓", "choose"}, {"enter", "do it"}, {"esc", "cancel"}}
 	}
-	if m.vols != nil {
-		keys = [][2]string{{"↑↓", "choose"}, {"enter", "reset"}, {"f", "reload"}, {"esc", "close"}}
-		if m.vols.confirm {
-			keys = [][2]string{{"y", "delete it"}, {"any other key", "cancel"}}
+	if _, ok := m.currentVolume(); ok && m.envs == nil && m.menu == nil {
+		keys = [][2]string{{"enter", "clear volume"}, {"↑↓", "move"}, {"tab", "next list"}, {"f", "refresh"}, {"q", "quit"}}
+		if m.confirm != "" {
+			keys = [][2]string{{"y", "delete it"}, {"any other key", "cancels"}}
 		}
 	}
 	var parts []string
