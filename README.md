@@ -204,6 +204,11 @@ Rebuild the image (`docker compose build <repo>`) after changing it.
 ## Dashboard
 
 Run `neptuno` with no arguments inside a project to open the dashboard. It
+runs in the first window of the project's `neptuno-<project>` tmux session,
+named `neptuno`: Neptuno creates the session if there is none, puts the
+dashboard window back if it was closed, selects it and attaches. Inside tmux
+it switches your client to the session instead of nesting one. Without tmux,
+or with `neptuno dashboard`, the dashboard runs in the current terminal. It
 lists every repo with its state, how many of its overmind processes are
 running, its branch, the commit it is at (`*` when the work tree has
 uncommitted changes), that commit's date and its envs, with the active one in
@@ -249,9 +254,9 @@ the container's output while it runs or after it fails, above it once it
 succeeds. The bottom line says when it is done or failed, and a service
 takes one command at a time.
 
-`neptuno up` makes the dashboard the first window of the `neptuno-<project>`
-session, named `neptuno`, so attaching lands on it. Quitting it closes that
-window, and the next `neptuno up` brings it back. `neptuno status` prints
+`neptuno up` makes the dashboard the first window of the session too, so
+attaching lands on it. Quitting it closes that window, and the next `neptuno`
+or `neptuno up` brings it back. `neptuno status` prints
 the same table once, for scripts and terminals without a TUI.
 
 ## Claude Code in your containers

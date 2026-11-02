@@ -16,7 +16,9 @@ func NewRootCommand() *cobra.Command {
 		Long: "Neptuno runs a multi-repo development environment by driving docker compose,\n" +
 			"overmind and tmux. Run it with no arguments inside a project to open the\n" +
 			"dashboard, which shows every repo and service, its state and its git\n" +
-			"commit, and starts, stops, restarts and opens them.",
+			"commit, and starts, stops, restarts and opens them. It runs in the first\n" +
+			"window of the project's tmux session, which neptuno creates if needed and\n" +
+			"attaches to, or switches to when you are already inside tmux.",
 		Version:      Version,
 		SilenceUsage: true,
 		Args:         cobra.NoArgs,
@@ -31,6 +33,7 @@ func NewRootCommand() *cobra.Command {
 		newUpCommand(),
 		newDownCommand(),
 		newStatusCommand(),
+		newDashboardCommand(),
 		newClaudeCommand(),
 		newEnvCommand(),
 		newRestartCommand(),

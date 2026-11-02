@@ -309,12 +309,32 @@ func (o *Orchestrator) newWindow(name, command string) error {
 	return o.Runner.Run(o.Project.Root, "tmux", "new-window", "-d", "-t", "="+o.SessionName()+":", "-n", name, "-c", o.Project.Root, command)
 }
 
+// OpenDashboard shows the dashboard in the project's tmux session. It
+// creates the session when there is none, and puts the dashboard window back
+// when it was closed, then selects that window and attaches to the session,
+// or switches to it when already inside tmux.
+func (o *Orchestrator) OpenDashboard() error {
+	if o.Runner.LookPath("tmux") != nil {
+		return errors.New("tmux not found on PATH")
+	}
+	if err := o.ensureDashboard(); err != nil {
+		return err
+	}
+	_ = o.Runner.Run(o.Project.Root, "tmux", "select-window", "-t", o.target(DashboardWindow))
+	return o.attach()
+}
+
+// DashboardCommand is the neptuno subcommand that runs the dashboard in the
+// terminal it is given. The dashboard window runs it, since bare neptuno
+// would open the session again.
+const DashboardCommand = "dashboard"
+
 // ensureDashboard makes sure the project's session exists and its first
 // window, named neptuno, runs the dashboard. A dashboard closed with q comes
 // back before the first window, next to the others.
 func (o *Orchestrator) ensureDashboard() error {
 	p := o.Project
-	command := procfile.Quote(o.Neptuno)
+	command := procfile.Quote(o.Neptuno) + " " + DashboardCommand
 	if !o.hasSession() {
 		return o.Runner.Run(p.Root, "tmux", "new-session", "-d", "-s", o.SessionName(), "-n", DashboardWindow, "-c", p.Root, command)
 	}
