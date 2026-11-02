@@ -279,16 +279,15 @@ func (m *dashboard) key(key string) (tea.Model, tea.Cmd) {
 		}
 	case "q", "esc", "ctrl+c":
 		return m, tea.Quit
-	case "tab", "shift+tab":
-		// Jump to the next list that has rows, where it last was.
-		step := 1
-		if key == "shift+tab" {
-			step = 2
-		}
-		m.jumpSection((m.section(m.cursor) + step) % 3)
-	case "]", "right", "l":
+	case "tab", "right", "l":
+		// Jump to the next list on the left that has rows, where the
+		// cursor last was in it.
+		m.jumpSection(1)
+	case "shift+tab", "left", "h":
+		m.jumpSection(-1)
+	case "]":
 		m.tab = (m.tab + 1) % len(tabNames)
-	case "[", "left", "h":
+	case "[":
 		m.tab = (m.tab + len(tabNames) - 1) % len(tabNames)
 	case "pgup", "ctrl+u", "pgdown", "ctrl+d":
 		// Logs scroll back from the end; the other tabs scroll down.
@@ -472,12 +471,12 @@ func (m *dashboard) compactView() string {
 	if m.message != "" {
 		b.WriteString("\n" + m.message + "\n")
 	}
-	help := "↑↓ move · space select · enter open window · u up · s stop · r restart · e env · c claude · f refresh · q quit"
+	help := "↑↓ move · ←→ list · space select · enter open window · u up · s stop · r restart · e env · c claude · f refresh · q quit"
 	if m.envs != nil {
 		help = "↑↓ move · enter switch · esc cancel"
 	}
 	if _, ok := m.currentVolume(); ok {
-		help = "↑↓ move · enter clear · tab next list · q quit"
+		help = "↑↓ move · ←→ list · enter clear · q quit"
 		if m.confirm != "" {
 			help = "y delete · any other key cancels"
 		}
@@ -566,10 +565,12 @@ func (m *dashboard) table() string {
 	return b.String()
 }
 
-// jumpSection moves the cursor to the list in section s, or the next one
-// after it that has rows, where the cursor last was in it.
-func (m *dashboard) jumpSection(s int) {
+// jumpSection moves the cursor to the next list in direction dir (1 down,
+// -1 up, wrapping around) that has rows, where the cursor last was in it.
+func (m *dashboard) jumpSection(dir int) {
+	s := m.section(m.cursor)
 	for range 3 {
+		s = (s + dir + 3) % 3
 		if i, seen := m.lastIn[s]; seen && i < m.total() && m.section(i) == s {
 			m.cursor = i
 			return
@@ -580,7 +581,6 @@ func (m *dashboard) jumpSection(s int) {
 				return
 			}
 		}
-		s = (s + 1) % 3
 	}
 }
 

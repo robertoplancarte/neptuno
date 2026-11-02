@@ -235,8 +235,8 @@ falls back to a plain list.
 | Key | Does |
 | --- | --- |
 | `↑` `↓` / `j` `k` | move |
-| `tab` | jump between the repos, services and volumes lists |
-| `[` `]` / `←` `→` | switch the right panel's tab |
+| `←` `→` / `h` `l` / `tab` | jump between the repos, services and volumes lists |
+| `[` `]` | switch the right panel's tab |
 | `PgUp` `PgDn` / `ctrl+u` `ctrl+d` | scroll the right panel |
 | `space` | select rows; `a` selects all |
 | `enter` | open the repo's window |
