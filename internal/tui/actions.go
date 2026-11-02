@@ -181,17 +181,18 @@ func (m *dashboard) handleAction(msg actionMsg) tea.Cmd {
 			return nil
 		}
 	}
-	name := "action"
+	name, added := "action", false
 	if a != nil {
 		a.running, a.err, name = false, msg.err, a.name
+		added = m.addDone(a)
 	}
 	if msg.err != nil {
 		m.message = warnStyle.Render(name + " failed: " + msg.err.Error() + " (see Logs)")
 	} else {
 		m.message = name + " done"
 	}
-	// Look inside a cleared volume again.
-	if _, ok := m.currentVolume(); ok {
+	// Look inside a cleared volume again, or show a new repo's Logs.
+	if _, ok := m.currentVolume(); ok || added {
 		m.panel = panelMsg{}
 		return tea.Batch(m.refresh(), m.fetchPanel())
 	}

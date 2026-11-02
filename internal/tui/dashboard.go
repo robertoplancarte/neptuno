@@ -15,6 +15,7 @@ import (
 	"github.com/robertoplancarte/neptuno/internal/orchestrate"
 	"github.com/robertoplancarte/neptuno/internal/procfile"
 	"github.com/robertoplancarte/neptuno/internal/proxy"
+	"github.com/robertoplancarte/neptuno/internal/stacks"
 )
 
 // DashboardOptions configures the dashboard.
@@ -47,6 +48,8 @@ type DashboardOptions struct {
 	// Exec runs a command in the project folder, for the MCP menu's
 	// `claude mcp add`. Nil runs it for real.
 	Exec func(name string, args ...string) (string, error)
+	// Stacks lists the stacks the add-repo form offers.
+	Stacks func() ([]*stacks.Stack, error)
 }
 
 type (
@@ -95,6 +98,14 @@ type dashboard struct {
 	volumes    []orchestrate.Volume
 	volumesErr error
 	confirm    string
+	// form is the open add-repo form, or nil, and focus a repo just added
+	// that the cursor moves to once the status lists it.
+	form  *addForm
+	focus string
+	// actionsFocus says the Actions tab's list has the cursor, at
+	// actionCursor.
+	actionsFocus bool
+	actionCursor int
 }
 
 // envChooser picks the configuration a repo runs with.
@@ -156,6 +167,15 @@ func (m *dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		first := !m.loaded
 		m.rows, m.loaded, m.loading, m.updated = msg, true, false, m.now()
 		m.clampCursor()
+		if m.focus != "" {
+			before := m.cursor
+			m.focusRow()
+			if m.cursor != before {
+				m.scroll = 0
+				m.lastIn[m.section(m.cursor)] = m.cursor
+				return m, m.fetchPanel()
+			}
+		}
 		if first {
 			return m, tea.Batch(m.tick(), m.fetchPanel())
 		}
@@ -199,7 +219,14 @@ func (m *dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyMsg:
 		cursor, tab := m.cursor, m.tab
-		model, cmd := m.key(msg.String())
+		var model tea.Model = m
+		var cmd tea.Cmd
+		if m.form != nil {
+			m.message = ""
+			cmd = m.formKey(msg)
+		} else {
+			model, cmd = m.key(msg.String())
+		}
 		if m.cursor != cursor || m.tab != tab {
 			m.scroll = 0
 			if m.cursor < m.total() {
@@ -248,6 +275,18 @@ func (m *dashboard) key(key string) (tea.Model, tea.Cmd) {
 	if m.menu != nil {
 		return m, m.menuKey(key)
 	}
+	if m.actionsFocus {
+		return m, m.actionsKey(key)
+	}
+	if m.tab == tabActions && key == "enter" && m.confirm == "" {
+		m.actionsFocus, m.actionCursor = true, 0
+		return m, nil
+	}
+	return m.dispatch(key)
+}
+
+// dispatch does what key does on the item under the cursor.
+func (m *dashboard) dispatch(key string) (tea.Model, tea.Cmd) {
 	if v, onVolume := m.currentVolume(); onVolume {
 		if cmd, handled := m.volumeKey(v, key); handled {
 			return m, cmd
@@ -318,6 +357,8 @@ func (m *dashboard) key(key string) (tea.Model, tea.Cmd) {
 		}
 	case "f":
 		return m, m.refresh()
+	case "n":
+		m.openAddForm()
 	case "u":
 		if names := m.targets(); len(names) > 0 {
 			m.selected = map[string]bool{}
@@ -461,7 +502,9 @@ func (m *dashboard) compactView() string {
 		return b.String()
 	}
 	b.WriteString(m.table())
-	if m.envs != nil {
+	if m.form != nil {
+		b.WriteString("\n" + m.formView() + "\n")
+	} else if m.envs != nil {
 		b.WriteString("\n" + m.envView())
 	} else if v, ok := m.currentVolume(); ok {
 		b.WriteString("\n" + m.volumePanel(v, max(40, m.width)) + "\n")
@@ -471,9 +514,12 @@ func (m *dashboard) compactView() string {
 	if m.message != "" {
 		b.WriteString("\n" + m.message + "\n")
 	}
-	help := "↑↓ move · ←→ list · space select · enter open window · u up · s stop · r restart · e env · c claude · f refresh · q quit"
+	help := "↑↓ move · ←→ list · space select · enter open window · u up · s stop · r restart · e env · c claude · n add repo · f refresh · q quit"
 	if m.envs != nil {
 		help = "↑↓ move · enter switch · esc cancel"
+	}
+	if m.form != nil {
+		help = "↑↓ field · ←→ stack · space toggle · enter add · esc cancel"
 	}
 	if _, ok := m.currentVolume(); ok {
 		help = "↑↓ move · ←→ list · enter clear · q quit"
@@ -495,7 +541,7 @@ func (m *dashboard) compactView() string {
 // table lists the repos, then the other services, one row each.
 func (m *dashboard) table() string {
 	if len(m.rows) == 0 {
-		return "compose.yml has no services yet; add a repo with `neptuno add`.\n"
+		return "compose.yml has no services yet; press n to add a repo.\n"
 	}
 	repoHead := []string{"REPO", "STATE", "PROCESSES", "BRANCH", "COMMIT", "DATE", "ENV"}
 	svcHead := []string{"SERVICE", "STATE", "PORTS"}

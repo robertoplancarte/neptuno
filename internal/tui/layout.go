@@ -16,9 +16,10 @@ const (
 	tabInfo = iota
 	tabEnv
 	tabLogs
+	tabActions
 )
 
-var tabNames = []string{"Info", "Env", "Logs"}
+var tabNames = []string{"Info", "Env", "Logs", "Actions"}
 
 var (
 	focusColor   = lipgloss.Color("2")
@@ -42,7 +43,7 @@ func (m *dashboard) panelKey() string {
 		return fmt.Sprintf("volume:%s:%t", v.Name, v.Exists)
 	}
 	r, ok := m.current()
-	if !ok || m.tab == tabInfo {
+	if !ok || m.tab == tabInfo || m.tab == tabActions {
 		return ""
 	}
 	return fmt.Sprintf("%d:%s:%s", m.tab, r.Name, r.Env)
@@ -155,7 +156,7 @@ func (m *dashboard) layoutView() string {
 	)
 	title := m.tabTitle()
 	if v, ok := m.currentVolume(); ok {
-		title = volumeTitle(v)
+		title = m.volumeTitle(v)
 	}
 	right := box(title, m.rightLines(bodyH-2, rightW-2), rightW, bodyH, false)
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, right) + "\n" + m.keyBar(width)
@@ -302,16 +303,20 @@ func (m *dashboard) tabTitle() string {
 func (m *dashboard) rightLines(height, width int) []string {
 	var text string
 	r, ok := m.current()
+	v, onVolume := m.currentVolume()
 	switch {
+	case m.form != nil:
+		text = m.formView()
 	case m.envs != nil:
 		text = m.envView()
 	case m.menu != nil:
 		text = m.menuView()
+	case m.tab == tabActions && m.confirm == "":
+		text = m.actionsView()
+	case onVolume:
+		text = m.volumePanel(v, width)
 	case !ok:
-		text = "compose.yml has no services yet; add a repo with `neptuno add`."
-		if v, onVolume := m.currentVolume(); onVolume {
-			text = m.volumePanel(v, width)
-		}
+		text = "compose.yml has no services yet; press n to add a repo."
 	case m.tab == tabInfo:
 		text = m.details(r)
 	case m.panel.key != m.panelKey():
@@ -326,7 +331,7 @@ func (m *dashboard) rightLines(height, width int) []string {
 	}
 	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
 	// Logs follow the end, like tail -f, unless scrolled up.
-	if m.tab == tabLogs && m.envs == nil && m.menu == nil && ok {
+	if m.tab == tabLogs && m.envs == nil && m.menu == nil && m.form == nil && ok {
 		end := max(0, len(lines)-height-m.scroll)
 		m.scroll = min(m.scroll, max(0, len(lines)-height))
 		lines = lines[end:]
@@ -345,7 +350,10 @@ func (m *dashboard) rightLines(height, width int) []string {
 
 func (m *dashboard) keyBar(width int) string {
 	keys := [][2]string{{"enter", "open"}, {"u", "up"}, {"s", "stop"}, {"r", "restart"}, {"e", "env"},
-		{"c", "claude"}, {"m", "mcp"}, {"space", "select"}, {"← →", "list"}, {"[ ]", "tab"}, {"q", "quit"}}
+		{"c", "claude"}, {"m", "mcp"}, {"n", "add repo"}, {"space", "select"}, {"← →", "list"}, {"[ ]", "tab"}, {"q", "quit"}}
+	if m.tab == tabActions {
+		keys[0] = [2]string{"enter", "choose action"}
+	}
 	if m.envs != nil {
 		keys = [][2]string{{"↑↓", "choose"}, {"enter", "switch"}, {"esc", "cancel"}}
 	}
@@ -353,9 +361,21 @@ func (m *dashboard) keyBar(width int) string {
 		keys = [][2]string{{"↑↓", "choose"}, {"enter", "do it"}, {"esc", "cancel"}}
 	}
 	if _, ok := m.currentVolume(); ok && m.envs == nil && m.menu == nil {
-		keys = [][2]string{{"enter", "clear volume"}, {"↑↓", "move"}, {"← →", "list"}, {"f", "refresh"}, {"q", "quit"}}
+		keys = [][2]string{{"enter", "clear volume"}, {"↑↓", "move"}, {"← →", "list"}, {"[ ]", "tab"}, {"n", "add repo"}, {"f", "refresh"}, {"q", "quit"}}
+		if m.tab == tabActions {
+			keys[0] = [2]string{"enter", "choose action"}
+		}
 		if m.confirm != "" {
 			keys = [][2]string{{"y", "delete it"}, {"any other key", "cancels"}}
+		}
+	}
+	if m.actionsFocus {
+		keys = [][2]string{{"↑↓", "choose"}, {"enter", "run it"}, {"esc", "back"}, {"other keys", "work as usual"}}
+	}
+	if m.form != nil {
+		keys = [][2]string{{"↑↓", "field"}, {"← →", "stack"}, {"space", "toggle"}, {"enter", "next / add"}, {"esc", "cancel"}}
+		if m.form.added != "" {
+			keys = [][2]string{{"esc", "hide"}}
 		}
 	}
 	var parts []string

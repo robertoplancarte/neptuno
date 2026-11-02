@@ -167,7 +167,11 @@ func TestArrowsMoveBetweenListsAndBracketsBetweenTabs(t *testing.T) {
 		t.Errorf("] went to tab %d, cursor %d; want Env on api", m.tab, m.cursor)
 	}
 	key(m, "[", "[")
+	if m.tab != tabActions {
+		t.Errorf("[ [ went to tab %d, want Actions", m.tab)
+	}
+	key(m, "[")
 	if m.tab != tabLogs {
-		t.Errorf("[ [ went to tab %d, want Logs", m.tab)
+		t.Errorf("[ [ [ went to tab %d, want Logs", m.tab)
 	}
 }

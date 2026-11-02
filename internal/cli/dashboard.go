@@ -9,6 +9,7 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/robertoplancarte/neptuno/internal/orchestrate"
 	"github.com/robertoplancarte/neptuno/internal/project"
+	"github.com/robertoplancarte/neptuno/internal/stacks"
 	"github.com/robertoplancarte/neptuno/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -76,6 +77,7 @@ func dashboardHere(o *orchestrate.Orchestrator) error {
 		MCP:           o.MCPSummary,
 		Volumes:       o.Volumes,
 		InspectVolume: o.InspectVolume,
+		Stacks:        func() ([]*stacks.Stack, error) { return stacks.List(o.Project.Path("stacks")) },
 	})
 }
 
