@@ -140,7 +140,7 @@ teams on RSpec:
 # stacks/rails/stack.yml  (extends the built-in rails it overrides)
 extends: rails
 generate: >-
-  gem install rails -v '~> 8.0' --no-document &&
+  gem install rails -v '~> 8.1' --no-document &&
   rails new . --name={{.Name}} --database=postgresql
   --skip-git --skip-docker --skip-kamal --skip-thruster --skip-test
 ```

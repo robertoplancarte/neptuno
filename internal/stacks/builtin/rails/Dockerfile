@@ -1,6 +1,6 @@
 # Development image for {{.Name}}. The full ruby image already has curl, git,
 # and the compilers and libpq headers native gems need.
-FROM ruby:3.3
+FROM ruby:4.0
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ripgrep \
  && rm -rf /var/lib/apt/lists/*

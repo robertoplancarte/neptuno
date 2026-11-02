@@ -1,4 +1,4 @@
-description: Ruby 3.3 and a new Rails 8 app on PostgreSQL, generated with rails new
+description: Ruby 4.0 and a new Rails 8.1 app on PostgreSQL, generated with rails new
 port: 3000
 services: [postgres, valkey, s3]
 # Installed gems live in a named volume, so they survive container rebuilds
@@ -8,11 +8,11 @@ volumes: ["{{.Name}}_bundle:/usr/local/bundle"]
 # options append their flags to it.
 generate: >-
   mkdir -p tmp && touch tmp/neptuno-new-app &&
-  gem install rails -v '~> 8.0' --no-document &&
+  gem install rails -v '~> 8.1' --no-document &&
   rails new . --name={{.Name}} --database=postgresql
   --skip-git --skip-docker --skip-kamal --skip-thruster
 
-# Choices `neptuno add --stack rails` offers. Rails 8 already sets up Solid
+# Choices `neptuno add --stack rails` offers. Rails 8.1 already sets up Solid
 # Queue, Solid Cache, Solid Cable and Active Storage on local disk.
 options:
   tailwind:
