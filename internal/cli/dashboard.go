@@ -57,7 +57,8 @@ func newDashboardCommand() *cobra.Command {
 				return err
 			}
 			if !isTerminal() {
-				fmt.Fprint(cmd.OutOrStdout(), tui.RenderStatus(o.Status()))
+				rows := o.Status()
+				fmt.Fprint(cmd.OutOrStdout(), tui.RenderStatus(rows)+tui.StatusWarnings(rows, o.HostWarnings()))
 				return nil
 			}
 			return dashboardHere(o)
@@ -83,6 +84,7 @@ func dashboardHere(o *orchestrate.Orchestrator) error {
 		Volumes:       func() ([]orchestrate.Volume, error) { return live.get().Volumes() },
 		InspectVolume: func(v orchestrate.Volume) (orchestrate.VolumeDetail, error) { return live.get().InspectVolume(v) },
 		Stacks:        func() ([]*stacks.Stack, error) { return stacks.List(o.Project.Path("stacks")) },
+		HostWarnings:  func() []string { return live.get().HostWarnings() },
 	})
 }
 
@@ -129,7 +131,8 @@ func newStatusCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprint(cmd.OutOrStdout(), tui.RenderStatus(o.Status()))
+			rows := o.Status()
+			fmt.Fprint(cmd.OutOrStdout(), tui.RenderStatus(rows)+tui.StatusWarnings(rows, o.HostWarnings()))
 			return nil
 		},
 	}

@@ -476,8 +476,8 @@ func (o *Orchestrator) writeTmuxConfig(repo, run string) error {
 		fmt.Sprintf("set-environment -g %s %s\n", procs.RunEnv, procfile.Quote(run)) +
 		// Restart finds the session's windows through this socket.
 		fmt.Sprintf(`run-shell "echo '#{socket_path}' > %s"`, procfile.Quote(o.Project.Path(overmindTmuxFile(repo)))) + "\n" +
-		fmt.Sprintf(`set-hook -g pane-died "run-shell \"%s pane-died %s '#{socket_path}' '#{pane_id}' '#{window_name}' '#{pane_dead_status}'\""`,
-			procfile.Quote(o.Neptuno), repo) + "\n"
+		fmt.Sprintf(`set-hook -g pane-died "run-shell \"%s pane-died %s '#{socket_path}' '#{pane_id}' '#{window_name}' '#{pane_dead_status}' %s\""`,
+			procfile.Quote(o.Neptuno), repo, procfile.Quote(o.Project.Root)) + "\n"
 	return os.WriteFile(o.Project.Path(tmuxConfig(repo)), []byte(conf), 0o644)
 }
 
@@ -662,25 +662,39 @@ func (o *Orchestrator) Down(names []string) error {
 		return err
 	}
 
+	daemons := o.hostOverminds()
 	repos := names
 	if len(names) == 0 {
-		repos = p.Repos
+		repos = append([]string(nil), p.Repos...)
+		for _, d := range daemons {
+			if !slices.Contains(repos, d.Repo) {
+				repos = append(repos, d.Repo)
+			}
+		}
 	}
 	for _, name := range names {
-		if _, ok := p.Services[name]; !ok && !p.IsRepo(name) {
+		if _, ok := p.Services[name]; !ok && !p.IsRepo(name) && countFor(daemons, name) == 0 {
 			return fmt.Errorf("unknown service %q", name)
 		}
 	}
 
 	for _, repo := range repos {
-		if !p.IsRepo(repo) {
+		if !p.IsRepo(repo) && countFor(daemons, repo) == 0 {
 			continue
 		}
+		answered := false
 		if _, err := os.Stat(p.Path(socket(repo))); err == nil {
 			fmt.Fprintf(o.Log, "Stopping overmind for %s\n", repo)
-			if !o.Runner.Check(p.Root, "overmind", "quit", "-s", socket(repo)) {
+			answered = o.Runner.Check(p.Root, "overmind", "quit", "-s", socket(repo))
+			if !answered {
 				fmt.Fprintf(o.Log, "warning: overmind for %s did not answer; closing its window\n", repo)
 			}
+		}
+		// A daemon the socket does not reach, such as one whose socket a
+		// second start replaced, or one for a repo no longer in the
+		// project.
+		if n := countFor(daemons, repo); n > 1 || n == 1 && !answered {
+			o.stopHostOverminds(repo, daemons)
 		}
 		if o.hasWindow(repo) {
 			_ = o.Runner.Run(p.Root, "tmux", "kill-window", "-t", o.target(repo))

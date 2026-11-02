@@ -137,7 +137,10 @@ func (m *dashboard) layoutView() string {
 			svcs = append(svcs, i)
 		}
 	}
-	projectLines := m.projectLines()
+	projectLines := wrapWarnings(m.projectLines(), leftW-2)
+	if len(projectLines) > 8 {
+		projectLines = append(projectLines[:7], warnStyle.Render("… neptuno status lists them all"))
+	}
 	projectH := len(projectLines) + 2
 	rest := bodyH - projectH
 	focus := m.section(m.cursor)
@@ -182,6 +185,9 @@ func (m *dashboard) projectLines() []string {
 	lines := []string{line, labelStyle.Render(m.opts.Session + " · " + updated)}
 	if l := m.mcpLine(); l != "" {
 		lines = append(lines, l)
+	}
+	for _, w := range m.hostWarnings {
+		lines = append(lines, warningLine(w))
 	}
 	return lines
 }
@@ -335,6 +341,9 @@ func (m *dashboard) rightLines(height, width int) []string {
 		text = m.panel.text
 	}
 	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	if m.tab == tabInfo {
+		lines = wrapWarnings(lines, width)
+	}
 	// Logs follow the end, like tail -f, unless scrolled up.
 	if m.tab == tabLogs && m.envs == nil && m.menu == nil && m.form == nil && ok {
 		end := max(0, len(lines)-height-m.scroll)

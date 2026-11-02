@@ -162,7 +162,8 @@ cd dockerfiles/api && neptuno up   # same as `neptuno up api`
 `neptuno up` starts the chosen services plus everything they `depends_on`.
 Containers start with `docker compose up --detach`. Each repo with a
 `procfiles/<repo>/Procfile` gets an overmind window in the `neptuno-<project>`
-tmux session, with every Procfile line wrapped in `docker compose exec <repo>`,
+tmux session, with every Procfile line run in the repo's container with
+`docker compose exec <repo>` (through `neptuno container-exec`, see below),
 and Neptuno attaches you to that session. `neptuno down [service...]` stops
 them again. Run with no arguments inside a repo's folder under `environments/`,
 `dockerfiles/`, `procfiles/` or `repos/`, `up`, `down` and `env show` act on
@@ -181,6 +182,35 @@ with a note on how to run it again: `neptuno restart <repo>:<process>`
 (`neptuno restart <repo>` restarts all of a repo's processes). `exit` or
 Ctrl-D in that shell closes the window, and `neptuno restart` reopens it. Your own
 `~/.tmux.conf` still applies inside overmind's session.
+
+### Processes left running in a container
+
+`docker compose exec` doesn't stop what it started when its client goes away,
+so a Procfile line that overmind stopped or lost could keep running in the
+container with no owner, holding its port. Neptuno prevents that in two ways:
+
+- Each line runs through `neptuno container-exec`, which starts the command
+  with `docker compose exec`, TTY and all, plus a quiet second exec that
+  watches it. Stopping or restarting the line forwards the signal to the
+  command's process group in the container, and if the line goes away any
+  other way (overmind or its tmux killed, the wrapper itself killed), the
+  watcher stops the group: TERM, then KILL five seconds later.
+- Every command records itself under `/dev/shm/neptuno-procs/<run>/`, where
+  the run is a fresh ID for each overmind Neptuno starts. Before `neptuno up`
+  starts or reconnects to a repo's processes, and before `neptuno restart`,
+  Neptuno stops whatever is recorded under any other run and says so.
+
+Both only signal process groups they recorded, and check that the recorded
+process is still the same one, so PID 1, the entrypoint and anything you start
+yourself with `docker compose exec` are never touched.
+
+What Neptuno can't clean up safely, it explains. When a process exits because
+its port was taken (`Address already in use`) or Rails says `A server is
+already running`, `neptuno status` and the dashboard say which process holds it
+and whether an earlier run, this run or something started by hand owns it, or
+that the pid file is stale. They also warn about overmind daemons on your
+machine that shouldn't be there: one for a repo that is no longer in the
+project, or two for the same repo. `neptuno down <repo>` stops those.
 
 ### Setup at container start
 

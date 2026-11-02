@@ -19,8 +19,10 @@ Work from the outside in and stop at the first thing that is wrong.
    `neptuno env show <repo>`: hosts must be service names such as
    `postgres`, not `localhost`, because the repo runs in its own container.
 4. **Processes.** Each Procfile line runs as
-   `docker compose exec <repo> sh -c '<command>'` under overmind. Run the
-   failing one by hand to see its error:
+   `docker compose exec <repo> sh -c '<command>'` under overmind, through
+   `neptuno container-exec`. `neptuno status` explains a process that
+   stopped because its port or server pid file was taken, and by what. Run
+   the failing one by hand to see its error:
    `docker compose exec -T <repo> sh -c '<command from procfiles/<repo>/Procfile>'`.
    Then `neptuno restart <repo>:<process>`.
 5. **Proxy.** A 502 from `http://<repo>.localhost` means Caddy reached no
