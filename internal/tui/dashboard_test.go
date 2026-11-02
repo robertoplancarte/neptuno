@@ -198,7 +198,7 @@ func TestDashboardPanels(t *testing.T) {
 	if view := m.View(); m.tab != tabLogs || !strings.Contains(view, "api booted") {
 		t.Errorf("Logs tab:\n%s", view)
 	}
-	key(m, "]")
+	key(m, "]", "]")
 	if m.tab != tabInfo {
 		t.Errorf("tabs do not wrap: %d", m.tab)
 	}

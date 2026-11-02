@@ -112,9 +112,13 @@ func (m *dashboard) volumeKey(v orchestrate.Volume, key string) (tea.Cmd, bool) 
 	return nil, false
 }
 
-// volumeTitle is the right panel's title for a volume.
-func volumeTitle(v orchestrate.Volume) string {
-	return tabActive.Render("Volume") + labelStyle.Render(" "+v.Name)
+// volumeTitle is the right panel's title for a volume: its panel and the
+// Actions tab, which [ and ] switch between.
+func (m *dashboard) volumeTitle(v orchestrate.Volume) string {
+	if m.tab == tabActions && m.confirm == "" {
+		return labelStyle.Render("Volume "+v.Name+" │ ") + tabActive.Render("Actions")
+	}
+	return tabActive.Render("Volume") + labelStyle.Render(" "+v.Name+" │ Actions")
 }
 
 // volumePanel describes the volume under the cursor: what it holds, who

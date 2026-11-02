@@ -223,14 +223,18 @@ container's health and what it depends on. It refreshes every two seconds.
 
 The screen is split into panels: the project, the repos and the services
 stacked on the left with the volumes under them, the focused list's border highlighted, and on the
-right a panel for the row under the cursor with three tabs. **Info** has the
+right a panel for the row under the cursor with four tabs. **Info** has the
 details above plus the URLs the row answers on through the proxy, read from
 the Caddyfile's sites; terminals with OSC 8 hyperlinks make them clickable
 (in tmux, set `terminal-features` to include `hyperlinks`). **Env** has the repo's resolved variables and the file each
 came from (as `neptuno env show` prints them), and **Logs** follows the
 container's output (`docker compose logs`); a `run: host` repo's output is in
-its window. The keys run along the bottom. In a terminal under 70×14 it
-falls back to a plain list.
+its window. **Actions** lists everything you can do to the row under the
+cursor, each with its key, and says why one can't run right now (a stopped
+repo has no window to open, say); press `enter` there to pick one with the
+arrows, or press its key from anywhere as before. Volumes get the Actions tab
+too. The keys run along the bottom. In a terminal under 70×14 it falls back
+to a plain list.
 
 | Key | Does |
 | --- | --- |
@@ -246,6 +250,7 @@ falls back to a plain list.
 | `e` | switch a repo's env, then restart it if it is running |
 | `c` | open Claude Code in a repo's container |
 | `m` | copy a repo's MCP URLs, or add its servers to Claude Code |
+| `n` | add a repo (see below) |
 | `q` | quit |
 
 A repo's envs are the `<name>.env` files in `environments/_shared` and
@@ -260,6 +265,21 @@ right panel switches to when that includes the row under the cursor: below
 the container's output while it runs or after it fails, above it once it
 succeeds. The bottom line says when it is done or failed, and a service
 takes one command at a time.
+
+### Adding a repo
+
+`n` opens a form in the right panel that does what `neptuno add` does: type
+the repo's name, optionally a git URL to clone (leave it blank to start a new
+app), pick a stack with `←` `→`, and tick the stack's options with `space`;
+they start at the stack's defaults, and the form shows the
+`neptuno add <name> [git-url] --stack ... --with ... --without ...` command it
+will run. `wildcard` adds `--wildcard`. `↑` `↓` or `tab` move between fields,
+`enter` on **Add repo** (or `ctrl+s` anywhere) runs it in the background, and
+`esc` cancels. The form shows the command's output while it runs; once it
+succeeds the cursor moves to the new repo with its Logs tab open, and if it
+fails the output stays up until `esc`. Cloning over SSH needs a key that
+doesn't prompt for a passphrase (an agent works), since the command has no
+terminal to ask in.
 
 ### Volumes
 
