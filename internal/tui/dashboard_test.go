@@ -159,7 +159,7 @@ func TestDashboardPanels(t *testing.T) {
 	m.opts.Vars = func(repo string) ([]env.Var, error) {
 		return []env.Var{{Key: "PORT", Value: "3000", Source: "environments/" + repo + "/base.env"}}, nil
 	}
-	m.opts.Logs = func(name string) (string, error) { return "line 1\nline 2\n" + name + " booted", nil }
+	m.opts.Logs = func(name string, _ time.Time) (string, error) { return "line 1\nline 2\n" + name + " booted", nil }
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 
 	view := m.View()
@@ -194,7 +194,7 @@ func TestDashboardPanels(t *testing.T) {
 	}
 
 	key(m, "]")
-	m.Update(panelMsg{m.panelKey(), logsText(m.rows[0], m.opts.Logs)})
+	m.Update(panelMsg{m.panelKey(), logsText(m.rows[0], m.opts.Logs, time.Time{})})
 	if view := m.View(); m.tab != tabLogs || !strings.Contains(view, "api booted") {
 		t.Errorf("Logs tab:\n%s", view)
 	}
@@ -212,7 +212,7 @@ func TestDashboardPanels(t *testing.T) {
 	if r, _ := m.current(); r.Name != "docs" {
 		t.Errorf("tab back went to %s, want docs", r.Name)
 	}
-	if !strings.Contains(logsText(m.rows[1], m.opts.Logs), "runs on the host") {
+	if !strings.Contains(logsText(m.rows[1], m.opts.Logs, time.Time{}), "runs on the host") {
 		t.Error("host repo logs should point at its window")
 	}
 }

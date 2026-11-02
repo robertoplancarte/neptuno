@@ -84,3 +84,36 @@ func TestSplitLines(t *testing.T) {
 		}
 	}
 }
+
+func TestStartingAServiceClearsItsLogs(t *testing.T) {
+	m := newTestDashboard()
+	var gotSince time.Time
+	m.opts.Logs = func(_ string, since time.Time) (string, error) {
+		gotSince = since
+		return "old output", nil
+	}
+	key(m, "]", "]")
+	before := m.panelKey()
+
+	key(m, "s")
+	if _, ok := m.logsSince["api"]; ok {
+		t.Error("stopping cleared api's logs; it should keep them until it starts again")
+	}
+	m.actions["api"].running = false
+
+	key(m, "u")
+	since, ok := m.logsSince["api"]
+	if !ok || !since.Equal(m.now()) {
+		t.Fatalf("up did not clear api's logs: %v", m.logsSince)
+	}
+	if m.panelKey() == before {
+		t.Error("panel key did not change, so logs from before the start would still show")
+	}
+	m.fetchPanel()()
+	if !gotSince.Equal(since) {
+		t.Errorf("Logs got since %v, want %v", gotSince, since)
+	}
+	if _, ok := m.logsSince["postgres"]; ok {
+		t.Error("starting api cleared postgres's logs")
+	}
+}
