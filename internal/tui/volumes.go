@@ -150,7 +150,7 @@ func (m *dashboard) volumePanel(v orchestrate.Volume, width int) string {
 		svc := mt.Service
 		for _, r := range m.rows {
 			if r.Name == mt.Service {
-				svc += " " + stateStyle(r).Render(stateLabel(r))
+				svc += " " + stateStyle(r).Render(m.stateLabel(r))
 			}
 		}
 		add(label, svc+labelStyle.Render(" at ")+mt.Target)

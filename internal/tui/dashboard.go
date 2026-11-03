@@ -61,6 +61,7 @@ type (
 	mcpMsg    orchestrate.MCPSummary
 	hostMsg   []string
 	tickMsg   struct{}
+	spinMsg   struct{}
 	doneMsg   struct {
 		action string
 		err    error
@@ -116,6 +117,9 @@ type dashboard struct {
 	// actionCursor.
 	actionsFocus bool
 	actionCursor int
+	// spinning is true while a spinner tick is on its way, which keeps the
+	// busy rows' spinners turning between refreshes.
+	spinning bool
 }
 
 // envChooser picks the configuration a repo runs with.
@@ -130,7 +134,14 @@ var (
 	nameStyle  = lipgloss.NewStyle().Bold(true)
 	labelStyle = lipgloss.NewStyle().Faint(true)
 	linkStyle  = lipgloss.NewStyle().Underline(true)
+	busyStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
 )
+
+// spinnerFrames turn next to a service that is pulling, building or
+// starting, so it shows work under way even while its output is quiet.
+var spinnerFrames = []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+
+const spinInterval = 120 * time.Millisecond
 
 func newDashboard(opts DashboardOptions) *dashboard {
 	if opts.Refresh == 0 {
@@ -170,6 +181,24 @@ func (m *dashboard) refresh() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// spin schedules the next spinner frame while any row is busy.
+func (m *dashboard) spin() tea.Cmd {
+	if m.spinning || !m.anyBusy() {
+		return nil
+	}
+	m.spinning = true
+	return tea.Tick(spinInterval, func(time.Time) tea.Msg { return spinMsg{} })
+}
+
+func (m *dashboard) anyBusy() bool {
+	for _, r := range m.rows {
+		if r.Progress != nil && r.State() == r.Progress.Phase {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *dashboard) tick() tea.Cmd {
 	return tea.Tick(m.opts.Refresh, func(time.Time) tea.Msg { return tickMsg{} })
 }
@@ -190,9 +219,12 @@ func (m *dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if first {
-			return m, tea.Batch(m.tick(), m.fetchPanel())
+			return m, tea.Batch(m.tick(), m.fetchPanel(), m.spin())
 		}
-		return m, nil
+		return m, m.spin()
+	case spinMsg:
+		m.spinning = false
+		return m, m.spin()
 	case hostMsg:
 		m.hostWarnings = msg
 		return m, nil
@@ -570,7 +602,7 @@ func (m *dashboard) table() string {
 		if r.Repo {
 			repos, repoIdx = append(repos, m.repoCells(r)), append(repoIdx, i)
 		} else {
-			svcs, svcIdx = append(svcs, serviceCells(r)), append(svcIdx, i)
+			svcs, svcIdx = append(svcs, m.serviceCells(r)), append(svcIdx, i)
 		}
 	}
 	// Both tables share the name and state columns, so they line up.
@@ -674,7 +706,7 @@ func (m *dashboard) repoCells(r orchestrate.ServiceStatus) []string {
 	if len(r.MCP) > 0 {
 		name += " (mcp)"
 	}
-	return []string{name, stateLabel(r), procs, branch, commit, date, plainEnvList(r)}
+	return []string{name, m.stateLabel(r), procs, branch, commit, date, plainEnvList(r)}
 }
 
 // plainEnvList lists a repo's envs with the active one in brackets, such as
@@ -738,20 +770,84 @@ func (m *dashboard) envView() string {
 	return b.String()
 }
 
-func serviceCells(r orchestrate.ServiceStatus) []string {
+func (m *dashboard) serviceCells(r orchestrate.ServiceStatus) []string {
 	ports := strings.Join(r.Ports, ", ")
 	if ports == "" {
 		ports = "-"
 	}
-	return []string{r.Name, stateLabel(r), ports}
+	return []string{r.Name, m.stateLabel(r), ports}
 }
 
-func stateLabel(r orchestrate.ServiceStatus) string {
+func (m *dashboard) stateLabel(r orchestrate.ServiceStatus) string {
+	if p := r.Progress; p != nil && r.State() == p.Phase {
+		return m.spinner() + " " + progressLabel(p)
+	}
 	dot := "○"
 	if r.Running() {
 		dot = "●"
 	}
 	return dot + " " + r.State()
+}
+
+// spinner is the spinner's frame now; `neptuno status`, printed once, gets
+// a still one.
+func (m *dashboard) spinner() string {
+	if m.opts.Status == nil {
+		return "◌"
+	}
+	n := m.now().UnixMilli() / spinInterval.Milliseconds()
+	return string(spinnerFrames[n%int64(len(spinnerFrames))])
+}
+
+// progressLabel is a phase with how far along it is, such as building 3/7.
+func progressLabel(p *orchestrate.Progress) string {
+	if p.Steps > 0 && (p.Phase == orchestrate.PhaseBuilding || p.Phase == orchestrate.PhasePulling) {
+		return fmt.Sprintf("%s %d/%d", p.Phase, p.Step, p.Steps)
+	}
+	return p.Phase
+}
+
+// progressLines describe what up is doing to a service, for its details.
+func (m *dashboard) progressLines(r orchestrate.ServiceStatus, add func(label, value string)) {
+	p := r.Progress
+	if p == nil || (r.State() != p.Phase) {
+		return
+	}
+	now := m.now()
+	what := map[string]string{
+		orchestrate.PhaseWaiting:  "its image is ready; waiting for the others to pull or build",
+		orchestrate.PhasePulling:  "pulling its image",
+		orchestrate.PhaseBuilding: "building its image",
+		orchestrate.PhaseCreating: "creating its container",
+		orchestrate.PhaseStarting: "starting its container",
+	}[p.Phase]
+	if what == "" {
+		what = p.Phase
+	}
+	what += labelStyle.Render(" for " + elapsed(now.Sub(p.Since)))
+	add("Up", busyStyle.Render(m.spinner())+" "+what)
+	switch {
+	case p.Phase == orchestrate.PhaseBuilding && p.Steps > 0:
+		add("Step", fmt.Sprintf("%d of %d · %s", p.Step, p.Steps, p.Detail))
+	case p.Phase == orchestrate.PhaseBuilding && p.Detail != "":
+		add("Step", p.Detail)
+	case p.Phase == orchestrate.PhasePulling && p.Steps > 0:
+		add("Layers", fmt.Sprintf("%d of %d done", p.Step, p.Steps))
+	}
+	if p.Output != "" {
+		add("Output", p.Output)
+	}
+	if p.Phase != orchestrate.PhaseWaiting {
+		quiet := now.Sub(p.Updated)
+		if quiet >= 10*time.Second {
+			add("", labelStyle.Render("no output for "+elapsed(quiet)+"; long steps, such as compiling, print nothing until they finish"))
+		}
+	}
+}
+
+// elapsed is a duration in whole seconds, such as 1m12s.
+func elapsed(d time.Duration) string {
+	return max(0, d).Truncate(time.Second).String()
 }
 
 func stateStyle(r orchestrate.ServiceStatus) lipgloss.Style {
@@ -760,7 +856,14 @@ func stateStyle(r orchestrate.ServiceStatus) lipgloss.Style {
 		return okStyle
 	case "stopped":
 		return headerStyle
-	case "partial", "starting", "created", "restarting", "paused":
+	case orchestrate.PhaseWaiting, orchestrate.PhasePulling, orchestrate.PhaseBuilding, orchestrate.PhaseCreating:
+		return busyStyle
+	case "starting":
+		if r.Progress != nil {
+			return busyStyle
+		}
+		return warnStyle
+	case "partial", "created", "restarting", "paused":
 		return warnStyle
 	}
 	return errStyle
@@ -800,6 +903,7 @@ func (m *dashboard) details(r orchestrate.ServiceStatus) string {
 		lines = append(lines, labelStyle.Render(fmt.Sprintf("%-11s", label))+value)
 	}
 	lines = append(lines, nameStyle.Render(r.Name))
+	m.progressLines(r, add)
 	if r.Repo {
 		mode := "in its container"
 		if r.RunMode == "host" {
