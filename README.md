@@ -22,6 +22,22 @@ cd acme
 docker compose up -d   # Caddy, PostgreSQL 17, Valkey 8, SeaweedFS, Svix
 ```
 
+In a terminal, `neptuno init` first shows a checklist of the default shared
+services, all checked: uncheck the ones the project doesn't need. Services a
+chosen one needs come along (Svix brings PostgreSQL and Valkey). Scripts pass
+`--services` to skip the checklist:
+
+```sh
+neptuno init acme --services postgres,valkey
+neptuno init acme --services=        # only the Caddy proxy
+```
+
+Run `neptuno init` again inside the project (or `neptuno init acme` next to
+it) to add default services you left out. It lists only the ones the project
+doesn't have, appends the picked ones to `compose.yml`, the `Caddyfile` and
+`environments/_shared/base.env`, and leaves existing services and your edits
+alone. `neptuno init --services svix` does the same without the checklist.
+
 `neptuno init <name>` creates:
 
 ```

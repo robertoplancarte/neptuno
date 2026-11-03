@@ -42,6 +42,8 @@ type picker struct {
 	descriptions map[string]string
 	allowEmpty   bool
 	action       string
+	// depsLabel introduces the dependencies the selection pulls in.
+	depsLabel string
 }
 
 var (
@@ -213,7 +215,11 @@ func (m *picker) dependencies() string {
 	if len(extra) == 0 {
 		return ""
 	}
-	return "Also starts dependencies: " + strings.Join(extra, ", ")
+	label := m.depsLabel
+	if label == "" {
+		label = "Also starts dependencies: "
+	}
+	return label + strings.Join(extra, ", ")
 }
 
 // PickOptions shows a checklist of a stack's options, with descriptions,
@@ -242,4 +248,43 @@ func PickServices(opts PickerOptions) ([]string, error) {
 		return nil, ErrCancelled
 	}
 	return m.Selection(), nil
+}
+
+// ChecklistOptions configures PickChecklist.
+type ChecklistOptions struct {
+	Title string
+	// Header names the group of items, such as "Services".
+	Header string
+	Names  []string
+	// Descriptions are shown next to the names.
+	Descriptions map[string]string
+	Preselected  []string
+	// Action names what enter does, such as "create".
+	Action string
+	// Closure expands a selection with what it needs, and DepsLabel
+	// introduces the names it adds, such as "Also adds: ".
+	Closure   func([]string) ([]string, error)
+	DepsLabel string
+}
+
+// PickChecklist shows a checklist that may be left empty and returns the
+// chosen names in order, or ErrCancelled.
+func PickChecklist(opts ChecklistOptions) ([]string, error) {
+	m := newChecklist(opts)
+	if _, err := tea.NewProgram(m).Run(); err != nil {
+		return nil, err
+	}
+	if !m.done {
+		return nil, ErrCancelled
+	}
+	return m.Selection(), nil
+}
+
+func newChecklist(opts ChecklistOptions) *picker {
+	m := newPicker(PickerOptions{Title: opts.Title, Repos: opts.Names, Preselected: opts.Preselected, Closure: opts.Closure})
+	if len(m.items) > 0 {
+		m.items[0].name = opts.Header
+	}
+	m.descriptions, m.allowEmpty, m.action, m.depsLabel = opts.Descriptions, true, opts.Action, opts.DepsLabel
+	return m
 }

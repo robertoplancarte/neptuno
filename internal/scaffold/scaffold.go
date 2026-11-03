@@ -54,6 +54,18 @@ type Options struct {
 	Name string
 	// Dir is the directory to create. Defaults to Name.
 	Dir string
+	// Services names the DefaultServices to set up, along with the ones
+	// they require. Nil means all of them; an empty slice means none, which
+	// leaves only the proxy.
+	Services []string
+}
+
+// templateData is what the project templates render with.
+type templateData struct {
+	Name string
+	// Services are the chosen shared services, and All is the proxy
+	// followed by them.
+	Services, All []Service
 }
 
 // Init creates the project directory with the four convention folders,
@@ -69,6 +81,15 @@ func Init(opts Options) ([]string, error) {
 		dir = opts.Name
 	}
 
+	names := opts.Services
+	if names == nil {
+		names = DefaultServiceNames()
+	}
+	services, _, err := ResolveServices(names)
+	if err != nil {
+		return nil, err
+	}
+
 	if err := ensureEmptyDir(dir); err != nil {
 		return nil, err
 	}
@@ -81,7 +102,7 @@ func Init(opts Options) ([]string, error) {
 		created = append(created, folder+"/")
 	}
 
-	data := struct{ Name string }{opts.Name}
+	data := templateData{Name: opts.Name, Services: services, All: append([]Service{Proxy}, services...)}
 	for _, f := range files {
 		out, err := render(f.template, data)
 		if err != nil {
@@ -97,7 +118,7 @@ func Init(opts Options) ([]string, error) {
 		created = append(created, f.path)
 	}
 
-	agents, err := WriteAgentFiles(dir, opts.Name)
+	agents, err := writeAgentFiles(dir, data)
 	created = append(created, agents...)
 	if err != nil {
 		return created, err
@@ -137,6 +158,17 @@ func AgentFiles() []struct{ Path, Template string } {
 // leaving the ones it has alone, and returns the paths it wrote, relative
 // to root.
 func WriteAgentFiles(root, name string) ([]string, error) {
+	data := templateData{Name: name}
+	if have, err := ExistingServices(root); err == nil {
+		data.Services, _, _ = ResolveServices(have)
+	} else {
+		data.Services = DefaultServices
+	}
+	data.All = append([]Service{Proxy}, data.Services...)
+	return writeAgentFiles(root, data)
+}
+
+func writeAgentFiles(root string, data templateData) ([]string, error) {
 	var wrote []string
 	for _, f := range AgentFiles() {
 		path := filepath.Join(root, filepath.FromSlash(f.Path))
@@ -145,7 +177,7 @@ func WriteAgentFiles(root, name string) ([]string, error) {
 		} else if !errors.Is(err, fs.ErrNotExist) {
 			return wrote, err
 		}
-		out, err := render(f.Template, struct{ Name string }{name})
+		out, err := render(f.Template, data)
 		if err != nil {
 			return wrote, err
 		}

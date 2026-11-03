@@ -71,3 +71,37 @@ func TestPicker(t *testing.T) {
 		t.Fatal("enter did not finish the picker")
 	}
 }
+
+func TestChecklist(t *testing.T) {
+	m := newChecklist(ChecklistOptions{
+		Title:        "Services",
+		Header:       "Services",
+		Names:        []string{"postgres", "valkey", "svix"},
+		Descriptions: map[string]string{"svix": "webhooks"},
+		Preselected:  []string{"postgres"},
+		Action:       "create",
+		Closure: func(sel []string) ([]string, error) {
+			for _, s := range sel {
+				if s == "svix" {
+					return append(sel, "valkey"), nil
+				}
+			}
+			return sel, nil
+		},
+		DepsLabel: "Also adds: ",
+	})
+	press(m, "down", "down", " ")
+	view := m.View()
+	for _, want := range []string{"Services", "webhooks", "Also adds: valkey", "enter create"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("view missing %q:\n%s", want, view)
+		}
+	}
+	if got := m.Selection(); !reflect.DeepEqual(got, []string{"postgres", "svix"}) {
+		t.Errorf("selection = %v", got)
+	}
+	press(m, "a", "a", "enter")
+	if !m.done || len(m.Selection()) != 0 {
+		t.Errorf("an empty checklist should be accepted: done=%v selection=%v", m.done, m.Selection())
+	}
+}
