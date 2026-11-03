@@ -19,14 +19,14 @@ go install github.com/robertoplancarte/neptuno/cmd/neptuno@latest
 ```sh
 neptuno init acme
 cd acme
-docker compose up -d   # Caddy, PostgreSQL 17, Valkey 8, SeaweedFS
+docker compose up -d   # Caddy, PostgreSQL 17, Valkey 8, SeaweedFS, Svix
 ```
 
 `neptuno init <name>` creates:
 
 ```
 acme/
-├── compose.yml      # yours to edit: proxy, postgres, valkey, s3
+├── compose.yml      # yours to edit: proxy, postgres, valkey, s3, svix
 ├── Caddyfile        # yours to edit: one http://<repo>.localhost block per repo
 ├── neptuno.yml      # optional project config
 ├── AGENTS.md        # tells coding agents in this folder how the project works
@@ -45,6 +45,13 @@ acme/
 | PostgreSQL | `postgres:17` | `localhost:5432` |
 | Valkey | `valkey/valkey:8` | `localhost:6379` |
 | Object storage | `chrislusf/seaweedfs` | `localhost:8333`, `s3.localhost` |
+| Webhooks | `svix/svix-server:v1` | `localhost:8071`, `svix.localhost` |
+
+Svix keeps its tables in the `postgres` database and its queue in Valkey.
+Every repo gets `SVIX_SERVER_URL=http://svix:8071` and a ready-made
+`SVIX_AUTH_TOKEN` for the API, signed with the development JWT secret in
+`compose.yml`. It may deliver webhooks to private addresses, so endpoints such
+as `http://api:3000/webhooks` reach the repos' containers.
 
 ## Adding repos
 

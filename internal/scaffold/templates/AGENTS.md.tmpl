@@ -17,7 +17,8 @@ compose, overmind and tmux. Run every command below from this folder.
   `neptuno env show <repo>` prints the merged result and where each value
   comes from.
 - `compose.yml`: the containers. Shared services are reachable from the
-  repos' containers by name: `postgres:5432`, `valkey:6379`, `s3:8333`.
+  repos' containers by name: `postgres:5432`, `valkey:6379`, `s3:8333`,
+  and the Svix webhook server at `svix:8071`.
 - `Caddyfile`: the reverse proxy, which serves each repo at
   `http://<repo>.localhost` on this machine.
 - `neptuno.yml`: project settings, such as repos that run on the host
