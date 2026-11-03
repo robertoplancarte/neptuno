@@ -6,18 +6,13 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
-)
 
-var (
-	topLevelKey  = regexp.MustCompile(`^[A-Za-z0-9_.-]+:`)
-	servicesLine = regexp.MustCompile(`^services:\s*(#.*)?$`)
-	volumesLine  = regexp.MustCompile(`^volumes:\s*(#.*)?$`)
+	"github.com/robertoplancarte/neptuno/internal/composefile"
 )
 
 // ClaudeVolume keeps Claude Code's sign-in and settings in the project's
@@ -71,156 +66,14 @@ func namedVolumes(specs []string) []string {
 	return out
 }
 
-// declareVolumes adds named volumes to the top-level volumes: block of a
-// compose file, creating it if needed, and skips ones already declared.
-func declareVolumes(src []byte, names []string) ([]byte, error) {
-	var cf struct {
-		Volumes map[string]any `yaml:"volumes"`
-	}
-	if err := yaml.Unmarshal(src, &cf); err != nil {
-		return nil, fmt.Errorf("compose.yml: %w", err)
-	}
-	var missing []string
-	for _, n := range names {
-		if _, ok := cf.Volumes[n]; !ok {
-			missing = append(missing, n)
-		}
-	}
-	if len(missing) == 0 {
-		return src, nil
-	}
-
-	lines := strings.Split(strings.TrimRight(string(src), "\n"), "\n")
-	start := -1
-	for i, l := range lines {
-		if volumesLine.MatchString(l) {
-			start = i
-			break
-		}
-	}
-	var out []string
-	if start < 0 {
-		out = append(lines, "", "volumes:")
-		for _, n := range missing {
-			out = append(out, "  "+n+":")
-		}
-	} else {
-		end := len(lines)
-		for i := start + 1; i < len(lines); i++ {
-			if topLevelKey.MatchString(lines[i]) {
-				end = i
-				break
-			}
-		}
-		indent := "  "
-		if fc := firstContent(lines, start); fc > start && fc < end {
-			if n := len(lines[fc]) - len(strings.TrimLeft(lines[fc], " ")); n > 0 {
-				indent = strings.Repeat(" ", n)
-			}
-		}
-		at := end
-		for at > start+1 && isBlankOrComment(lines[at-1]) {
-			at--
-		}
-		out = append(out, lines[:at]...)
-		for _, n := range missing {
-			out = append(out, indent+n+":")
-		}
-		out = append(out, lines[at:]...)
-	}
-	result := []byte(strings.Join(out, "\n") + "\n")
-	if err := yaml.Unmarshal(result, &cf); err != nil {
-		return nil, fmt.Errorf("declaring volumes would leave compose.yml invalid: %w", err)
-	}
-	for _, n := range missing {
-		if _, ok := cf.Volumes[n]; !ok {
-			return nil, fmt.Errorf("could not declare volume %s in compose.yml; add it by hand", n)
-		}
-	}
-	return result, nil
-}
-
-// insertService adds a service at the end of the services: block of a
-// compose file, keeping everything else byte for byte. It matches the
-// file's indentation and refuses to write anything that does not parse.
+// insertService adds a repo's service to a compose file.
 func insertService(src []byte, svc serviceSpec) ([]byte, error) {
-	text := strings.ReplaceAll(string(src), "\r\n", "\n")
-	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
-	if text == "" {
-		lines = nil
-	}
-
-	start := -1
-	for i, l := range lines {
-		if servicesLine.MatchString(l) {
-			start = i
-			break
-		}
-	}
-
-	var out []string
-	if start < 0 {
-		out = lines
-		if len(out) > 0 {
-			out = append(out, "")
-		}
-		out = append(out, "services:")
-		out = append(out, svc.lines("  ")...)
-	} else {
-		end := len(lines)
-		for i := start + 1; i < len(lines); i++ {
-			if topLevelKey.MatchString(lines[i]) {
-				end = i
-				break
-			}
-		}
-		indent := "  "
-		if fc := firstContent(lines, start); fc > start && fc < end {
-			if n := len(lines[fc]) - len(strings.TrimLeft(lines[fc], " ")); n > 0 {
-				indent = strings.Repeat(" ", n)
-			}
-		}
-		// Insert after the block's last content line, before blank lines and
-		// comments that belong to whatever follows.
-		at := end
-		for at > start+1 && isBlankOrComment(lines[at-1]) {
-			at--
-		}
-		out = append(out, lines[:at]...)
-		if at > start+1 {
-			out = append(out, "")
-		}
-		out = append(out, svc.lines(indent)...)
-		out = append(out, lines[at:]...)
-	}
-	result := []byte(strings.Join(out, "\n") + "\n")
-
-	var check struct {
-		Services map[string]any `yaml:"services"`
-	}
-	if err := yaml.Unmarshal(result, &check); err != nil {
-		return nil, fmt.Errorf("adding %s would leave compose.yml invalid: %w", svc.Name, err)
-	}
-	if _, ok := check.Services[svc.Name]; !ok {
-		return nil, fmt.Errorf("could not place %s under services: in compose.yml; add it by hand", svc.Name)
-	}
-	return result, nil
+	return composefile.InsertService(src, svc.Name, svc.lines)
 }
 
-// firstContent returns the index of the first non-blank, non-comment line
-// after start.
-func firstContent(lines []string, start int) int {
-	for i := start + 1; i < len(lines); i++ {
-		if !isBlankOrComment(lines[i]) {
-			return i
-		}
-	}
-	return -1
-}
-
-func isBlankOrComment(l string) bool {
-	t := strings.TrimSpace(l)
-	return t == "" || strings.HasPrefix(t, "#")
+// declareVolumes adds named volumes to a compose file's volumes: block.
+func declareVolumes(src []byte, names []string) ([]byte, error) {
+	return composefile.DeclareVolumes(src, names)
 }
 
 // caddySite adds an http://<name>.localhost block unless one exists. With

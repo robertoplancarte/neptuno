@@ -1,56 +1,13 @@
 # compose.yml for {{.Name}}, scaffolded by `neptuno init`.
 #
 # This file is yours: edit, add or remove services freely. Neptuno only
-# appends a service here when you run `neptuno add <repo> <git-url>`.
+# appends a service here when you run `neptuno add <repo> <git-url>`, or
+# `neptuno init` in this folder to add a default service you left out.
 name: {{.Name}}
 
 services:
-  proxy:
-    image: caddy:2
-    ports: ["80:80"]
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy:/data
-
-  postgres:
-    image: postgres:17
-    environment:
-      POSTGRES_PASSWORD: postgres
-    ports: ["5432:5432"]
-    volumes: ["postgres:/var/lib/postgresql/data"]
-
-  valkey:
-    image: valkey/valkey:8
-    ports: ["6379:6379"]
-    volumes: ["valkey:/data"]
-
-  s3:
-    image: chrislusf/seaweedfs
-    command: server -s3 -dir=/data
-    ports: ["8333:8333"]
-    volumes: ["s3:/data"]
-
-  # Svix webhook server. It keeps its tables in postgres's default "postgres"
-  # database and its queue and cache in valkey, so it adds no volume of its
-  # own. Repos get SVIX_SERVER_URL and SVIX_AUTH_TOKEN from _shared/base.env.
-  # Changing SVIX_JWT_SECRET makes that token invalid: generate a new one with
-  # docker compose exec svix svix-server jwt generate
-  svix:
-    image: svix/svix-server:v1
-    environment:
-      WAIT_FOR: "true"
-      SVIX_JWT_SECRET: neptuno-local-svix-jwt-secret
-      SVIX_DB_DSN: postgresql://postgres:postgres@postgres:5432/postgres
-      SVIX_REDIS_DSN: redis://valkey:6379
-      SVIX_QUEUE_TYPE: redis
-      SVIX_CACHE_TYPE: redis
-      # Let webhooks reach the repos' containers, which have private IPs.
-      SVIX_WHITELIST_SUBNETS: '["10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","127.0.0.0/8"]'
-    ports: ["8071:8071"]
-    depends_on: [postgres, valkey]
-
+{{- range .All}}
+{{.ComposeBlock}}{{end}}
 volumes:
-  caddy:
-  postgres:
-  valkey:
-  s3:
+{{- range .All}}{{range .Volumes}}
+  {{.}}:{{end}}{{end}}
