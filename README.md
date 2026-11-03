@@ -287,6 +287,17 @@ and loads the project again when `neptuno.yml`, `compose.yml` or `repos/`
 change, so a repo added from the dashboard or the shell shows up without
 restarting it.
 
+While `neptuno up` gets containers going, from the dashboard or a shell, each
+service it starts shows what is happening instead of `stopped`: `pulling`
+(with layers done, such as `pulling 3/7`, when one image pulls alone),
+`building` (with the Dockerfile step, such as `building 4/9`), `waiting` for
+the other images, then `creating` and `starting`, next to a spinner. The row
+under the cursor shows how long the phase has run, the build step's
+instruction and the last line it printed, and says so when a step such as a
+compile has printed nothing for a while. `up` reads this from docker
+compose's output, so compose prints it plainly rather than redrawing it in
+place.
+
 The screen is split into panels: the project, the repos and the services
 stacked on the left with the volumes under them, the focused list's border highlighted, and on the
 right a panel for the row under the cursor with four tabs. **Info** has the

@@ -59,6 +59,9 @@ type ServiceStatus struct {
 	DependsOn []string
 	// Git describes the repo's checkout, or is nil when it has none.
 	Git *GitStatus
+	// Progress is what a running `neptuno up` is doing to the service's
+	// container, such as pulling or building its image, or nil.
+	Progress *Progress
 	// Warnings explain stopped processes that could not start because
 	// their port or server pid file was taken, and by what.
 	Warnings []string
@@ -88,6 +91,12 @@ func (s ServiceStatus) Running() bool {
 
 // State is a one-word summary: running, partial, exited, stopped and so on.
 func (s ServiceStatus) State() string {
+	// A service up is pulling, building or starting shows that, even over
+	// the container it replaces; one only waiting for others shows what
+	// runs now.
+	if p := s.Progress; p != nil && (p.Busy() || !s.Running()) {
+		return p.Phase
+	}
 	if s.Overmind {
 		up := 0
 		for _, p := range s.Processes {
@@ -133,6 +142,7 @@ func (o *Orchestrator) Status() []ServiceStatus {
 	}
 	st, _ := state.Load(p.Root)
 	sites, published := o.proxySites(containers)
+	progress := readProgress(p.Root)
 	servers, _ := mcp.Servers(p, sites, published)
 
 	var out []ServiceStatus
@@ -145,6 +155,7 @@ func (o *Orchestrator) Status() []ServiceStatus {
 			s.URLs = proxy.URLs(sites, name, published)
 		}
 		s.MCP = mcp.ForRepo(servers, name)
+		s.Progress = progress[name]
 		if s.Repo {
 			s.RunMode = p.RunMode(name)
 			if s.RunMode == project.RunHost {

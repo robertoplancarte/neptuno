@@ -280,7 +280,7 @@ func (m *dashboard) volumeLines(height, width int) []string {
 
 // listCells is a row's columns in the left panels.
 func (m *dashboard) listCells(r orchestrate.ServiceStatus) []string {
-	cells := []string{r.Name, stateLabel(r)}
+	cells := []string{r.Name, m.stateLabel(r)}
 	if !r.Repo {
 		return append(cells, strings.Join(r.Ports, " "))
 	}

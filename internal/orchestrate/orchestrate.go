@@ -126,8 +126,7 @@ func (o *Orchestrator) Up(opts UpOptions) error {
 	before := o.containerIDs(windows)
 	if len(plan.Compose) > 0 {
 		fmt.Fprintf(o.Log, "Starting containers: %s\n", strings.Join(plan.Compose, ", "))
-		args := append([]string{"compose", "up", "--detach"}, plan.Compose...)
-		if err := o.Runner.Run(p.Root, "docker", args...); err != nil {
+		if err := o.composeUp(plan.Compose); err != nil {
 			return err
 		}
 	}
