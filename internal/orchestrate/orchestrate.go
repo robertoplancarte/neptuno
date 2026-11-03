@@ -115,6 +115,13 @@ func (o *Orchestrator) Up(opts UpOptions) error {
 	if err := o.hook("before_up", p.Config.Hooks.BeforeUp); err != nil {
 		return err
 	}
+	// The hook may write env files, such as a token in
+	// environments/_shared/*.local.env, so resolve them again.
+	if p.Config.Hooks.BeforeUp != "" {
+		if err := o.WriteEnvFiles(st, opts.Set); err != nil {
+			return err
+		}
+	}
 
 	before := o.containerIDs(windows)
 	if len(plan.Compose) > 0 {

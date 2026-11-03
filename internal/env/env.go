@@ -6,7 +6,8 @@
 //	environments/_shared/staging.env
 //	environments/api/base.env
 //	environments/api/staging.env
-//	environments/api/*.local.env   (git-ignored, personal overrides)
+//	environments/_shared/*.local.env   (git-ignored, personal overrides for every repo)
+//	environments/api/*.local.env       (git-ignored, personal overrides for api)
 //	extra variables (neptuno up --set KEY=value)
 package env
 
@@ -44,7 +45,10 @@ type Resolver struct {
 }
 
 // Files returns the env files that apply to repo and config, in the order
-// they are merged. Files that do not exist are left out.
+// they are merged. Files that do not exist are left out. Personal
+// *.local.env files come after every committed file, so a personal value
+// always beats a committed one; _shared's come before the repo's own, so a
+// repo-specific personal value beats a shared one.
 func (r Resolver) Files(repo, config string) ([]string, error) {
 	var files []string
 	for _, dir := range []string{SharedDir, repo} {
@@ -55,12 +59,15 @@ func (r Resolver) Files(repo, config string) ([]string, error) {
 			}
 		}
 	}
-	personal, err := filepath.Glob(filepath.Join(r.Dir, repo, "*.local.env"))
-	if err != nil {
-		return nil, err
+	for _, dir := range []string{SharedDir, repo} {
+		personal, err := filepath.Glob(filepath.Join(r.Dir, dir, "*.local.env"))
+		if err != nil {
+			return nil, err
+		}
+		sort.Strings(personal)
+		files = append(files, personal...)
 	}
-	sort.Strings(personal)
-	return append(files, personal...), nil
+	return files, nil
 }
 
 // Resolve merges every layer for repo and config, then applies extra.

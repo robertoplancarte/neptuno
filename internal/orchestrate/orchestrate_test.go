@@ -689,3 +689,36 @@ func TestOpenDashboardWithoutClaudeSkipsTheSplit(t *testing.T) {
 		t.Errorf("commands:\n%s\nwant:\n%s", strings.Join(f.cmds, "\n"), strings.Join(want, "\n"))
 	}
 }
+
+// hookRunner runs the before_up hook by writing a shared personal env file,
+// as a hook that fetches a token would.
+type hookRunner struct {
+	*fakeRunner
+	root string
+}
+
+func (h hookRunner) Run(dir, name string, args ...string) error {
+	if name == "sh" {
+		path := filepath.Join(h.root, "environments/_shared/hook0.local.env")
+		if err := os.WriteFile(path, []byte("HOOK0_API_TOKEN=from-hook\n"), 0o600); err != nil {
+			return err
+		}
+	}
+	return h.fakeRunner.Run(dir, name, args...)
+}
+
+func TestUpResolvesEnvAgainAfterBeforeUpHook(t *testing.T) {
+	t.Setenv("TMUX", "")
+	o, f := setup(t)
+	o.Project.Config.Hooks.BeforeUp = "scripts/before_up.sh"
+	o.Runner = hookRunner{f, o.Project.Root}
+
+	if err := o.Up(UpOptions{Selected: []string{"api"}, Detach: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, repo := range []string{"api", "web"} {
+		if got := read(t, filepath.Join(o.Project.Root, ".neptuno/env", repo+".env")); !strings.Contains(got, "HOOK0_API_TOKEN=from-hook\n") {
+			t.Errorf("%s.env lacks the value the before_up hook wrote:\n%s", repo, got)
+		}
+	}
+}

@@ -500,7 +500,15 @@ to run. Any other MCP client that starts local servers can run
 
 Each repo's env is merged from `environments/` in this order, later wins:
 `_shared/base.env`, `_shared/<config>.env`, `<repo>/base.env`,
-`<repo>/<config>.env`, `<repo>/*.local.env`, then `neptuno up --set KEY=value`.
+`<repo>/<config>.env`, `_shared/*.local.env`, `<repo>/*.local.env`, then
+`neptuno up --set KEY=value`.
+
+`*.local.env` files are personal and git-ignored. They come after every
+committed file, so your value wins even when a repo commits its own. One in
+`_shared/` reaches every repo, including repos added later: a `before_up`
+hook can write `environments/_shared/hook0.local.env` once and every repo gets
+what it holds. Neptuno resolves env files again after `before_up`, so values
+the hook writes apply to the same `up`. A repo's own `*.local.env` still beats a shared one.
 
 ```sh
 neptuno env use staging                  # whole project
