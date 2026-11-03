@@ -49,10 +49,11 @@ func TestResolveOrder(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("_shared/base.env", "A=shared-base\nB=shared-base\nC=shared-base\nD=shared-base\nE=shared-base\nF=shared-base\n")
-	write("_shared/staging.env", "B=shared-staging\nC=shared-staging\nD=shared-staging\nE=shared-staging\nF=shared-staging\n")
-	write("api/base.env", "C=api-base\nD=api-base\nE=api-base\nF=api-base\n")
-	write("api/staging.env", "D=api-staging\nE=api-staging\nF=api-staging\n")
+	write("_shared/base.env", "A=shared-base\nB=shared-base\nC=shared-base\nD=shared-base\nE=shared-base\nF=shared-base\nG=shared-base\n")
+	write("_shared/staging.env", "B=shared-staging\nC=shared-staging\nD=shared-staging\nE=shared-staging\nF=shared-staging\nG=shared-staging\n")
+	write("api/base.env", "C=api-base\nD=api-base\nE=api-base\nF=api-base\nG=api-base\n")
+	write("api/staging.env", "D=api-staging\nE=api-staging\nF=api-staging\nG=api-staging\n")
+	write("_shared/hook0.local.env", "E=shared-personal\nF=shared-personal\nG=shared-personal\n")
 	write("api/me.local.env", "E=personal\nF=personal\n")
 	write("api/local.env", "A=wrong-config\n")
 	write("web/base.env", "A=other-repo\n")
@@ -73,6 +74,7 @@ func TestResolveOrder(t *testing.T) {
 		"D": "api-staging from " + base + "/api/staging.env",
 		"E": "personal from " + base + "/api/me.local.env",
 		"F": "flag from --set",
+		"G": "shared-personal from " + base + "/_shared/hook0.local.env",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Resolve =\n%v\nwant\n%v", got, want)

@@ -12,8 +12,10 @@ compose, overmind and tmux. Run every command below from this folder.
 - `dockerfiles/<repo>/`: the repo's development Dockerfile and its
   `entrypoint.sh`, which runs setup such as `bundle install` at every start.
 - `procfiles/<repo>/Procfile`: the processes overmind runs for the repo.
-- `environments/`: env files. `_shared/` applies to every repo, then
-  `<repo>/base.env`, `<repo>/<env>.env` and git-ignored `*.local.env`.
+- `environments/`: env files, later wins: `_shared/base.env`,
+  `_shared/<env>.env`, `<repo>/base.env`, `<repo>/<env>.env`, then the
+  git-ignored personal overrides `_shared/*.local.env` (every repo) and
+  `<repo>/*.local.env`.
   `neptuno env show <repo>` prints the merged result and where each value
   comes from.
 - `compose.yml`: the containers.{{if .Services}} Shared services are reachable from the
