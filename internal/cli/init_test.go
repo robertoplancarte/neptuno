@@ -69,20 +69,20 @@ func readFile(t *testing.T, path string) string {
 
 func TestInitServicesFlag(t *testing.T) {
 	t.Chdir(t.TempDir())
-	out, err := runInit(t, "acme", "--no-git", "--services", "svix")
+	out, err := runInit(t, "acme", "--no-git", "--services", "hook0")
 	if err != nil {
 		t.Fatalf("init: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "Adding postgres, valkey too") || !strings.Contains(out, "with proxy, postgres, valkey, svix") {
+	if !strings.Contains(out, "Adding postgres too") || !strings.Contains(out, "with proxy, postgres, hook0") {
 		t.Errorf("output doesn't explain the services:\n%s", out)
 	}
 	compose := readFile(t, "acme/compose.yml")
-	for _, want := range []string{"image: caddy:2", "image: postgres:17", "image: valkey/valkey:8", "image: svix/svix-server:v1"} {
+	for _, want := range []string{"image: caddy:2", "image: postgres:18", "image: hook0/hook0-api:1.0.2", "image: hook0/hook0-output-worker:1.0.7", "  hook0-setup:\n"} {
 		if !strings.Contains(compose, want) {
 			t.Errorf("compose.yml missing %q", want)
 		}
 	}
-	if strings.Contains(compose, "seaweedfs") || strings.Contains(readFile(t, "acme/Caddyfile"), "s3.localhost") ||
+	if strings.Contains(compose, "valkey") || strings.Contains(compose, "seaweedfs") || strings.Contains(readFile(t, "acme/Caddyfile"), "s3.localhost") ||
 		strings.Contains(readFile(t, "acme/environments/_shared/base.env"), "S3_ENDPOINT") {
 		t.Error("s3 was set up without being chosen")
 	}
@@ -124,11 +124,11 @@ func TestInitAddsServicesToExistingProject(t *testing.T) {
 		t.Fatalf("non-interactive init in a project = %v, want a hint about --services", err)
 	}
 
-	out, err := runInit(t, "acme", "--services", "postgres,s3,svix")
+	out, err := runInit(t, "acme", "--services", "postgres,valkey,s3,hook0")
 	if err != nil {
 		t.Fatalf("init: %v\n%s", err, out)
 	}
-	for _, want := range []string{"Adding valkey too", "kept    compose.yml service postgres", "added   compose.yml service svix", "added   Caddyfile site http://s3.localhost"} {
+	for _, want := range []string{"kept    compose.yml service postgres", "added   compose.yml service hook0", "added   Caddyfile site http://hook0.localhost", "added   Caddyfile site http://s3.localhost"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
@@ -137,7 +137,7 @@ func TestInitAddsServicesToExistingProject(t *testing.T) {
 	if !strings.HasPrefix(got, strings.TrimRight(compose, "\n")[:strings.Index(compose, "volumes:")]) {
 		t.Errorf("existing services changed:\n%s", got)
 	}
-	for _, want := range []string{"# my note", "image: valkey/valkey:8", "image: chrislusf/seaweedfs", "image: svix/svix-server:v1", "  s3:\n", "  valkey:\n"} {
+	for _, want := range []string{"# my note", "image: valkey/valkey:8", "image: chrislusf/seaweedfs", "image: hook0/hook0-api:1.0.2", "  s3:\n", "  valkey:\n", "  hook0-worker:\n"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("compose.yml missing %q:\n%s", want, got)
 		}
@@ -146,13 +146,13 @@ func TestInitAddsServicesToExistingProject(t *testing.T) {
 		t.Errorf("postgres duplicated:\n%s", got)
 	}
 	env := readFile(t, "acme/environments/_shared/base.env")
-	if strings.Count(env, "DATABASE_HOST=") != 1 || !strings.Contains(env, "REDIS_URL=") || !strings.Contains(env, "SVIX_AUTH_TOKEN=") {
+	if strings.Count(env, "DATABASE_HOST=") != 1 || !strings.Contains(env, "REDIS_URL=") || !strings.Contains(env, "HOOK0_API_TOKEN=") {
 		t.Errorf("base.env =\n%s", env)
 	}
 
 	// From inside the project, with no name, and everything there already.
 	t.Chdir("acme")
-	out, err = runInit(t, "--services", "svix")
+	out, err = runInit(t, "--services", "hook0")
 	if err != nil {
 		t.Fatalf("init: %v\n%s", err, out)
 	}
@@ -172,10 +172,10 @@ func TestInitMenu(t *testing.T) {
 			}
 			return []string{"postgres"}, nil
 		}
-		if deps, _ := opts.Closure([]string{"svix"}); strings.Join(deps, ",") != "valkey,svix" {
-			t.Errorf("closure = %v, want valkey,svix (postgres is there)", deps)
+		if deps, _ := opts.Closure([]string{"hook0"}); strings.Join(deps, ",") != "hook0" {
+			t.Errorf("closure = %v, want hook0 (postgres is there)", deps)
 		}
-		return []string{"svix"}, nil
+		return []string{"hook0"}, nil
 	}
 	t.Cleanup(func() { pickServices = tui.PickChecklist })
 
@@ -183,10 +183,10 @@ func TestInitMenu(t *testing.T) {
 	if _, err := createAndAdd(t, root); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(offered[1], ",") != "valkey,s3,svix" {
+	if strings.Join(offered[1], ",") != "valkey,s3,hook0" {
 		t.Errorf("second menu offered %v, want the missing services", offered[1])
 	}
-	if got := readFile(t, "acme/compose.yml"); !strings.Contains(got, "svix:") || strings.Contains(got, "seaweedfs") {
+	if got := readFile(t, "acme/compose.yml"); !strings.Contains(got, "hook0:") || strings.Contains(got, "seaweedfs") {
 		t.Errorf("compose.yml =\n%s", got)
 	}
 }

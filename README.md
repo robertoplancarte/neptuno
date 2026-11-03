@@ -19,12 +19,12 @@ go install github.com/robertoplancarte/neptuno/cmd/neptuno@latest
 ```sh
 neptuno init acme
 cd acme
-docker compose up -d   # Caddy, PostgreSQL 17, Valkey 8, SeaweedFS
+docker compose up -d   # Caddy, PostgreSQL 18, Valkey 8, SeaweedFS, Hook0
 ```
 
 In a terminal, `neptuno init` first shows a checklist of the default shared
 services, all checked: uncheck the ones the project doesn't need. Services a
-chosen one needs come along. Scripts pass
+chosen one needs come along (Hook0 brings PostgreSQL). Scripts pass
 `--services` to skip the checklist:
 
 ```sh
@@ -36,13 +36,13 @@ Run `neptuno init` again inside the project (or `neptuno init acme` next to
 it) to add default services you left out. It lists only the ones the project
 doesn't have, appends the picked ones to `compose.yml`, the `Caddyfile` and
 `environments/_shared/base.env`, and leaves existing services and your edits
-alone. `neptuno init --services s3` does the same without the checklist.
+alone. `neptuno init --services hook0` does the same without the checklist.
 
 `neptuno init <name>` creates:
 
 ```
 acme/
-├── compose.yml      # yours to edit: proxy, postgres, valkey, s3
+├── compose.yml      # yours to edit: proxy, postgres, valkey, s3, hook0
 ├── Caddyfile        # yours to edit: one http://<repo>.localhost block per repo
 ├── neptuno.yml      # optional project config
 ├── AGENTS.md        # tells coding agents in this folder how the project works
@@ -58,9 +58,26 @@ acme/
 | Service | Image | Reachable at |
 | --- | --- | --- |
 | Reverse proxy | `caddy:2` | `localhost:80`, `<repo>.localhost` |
-| PostgreSQL | `postgres:17` | `localhost:5432` |
+| PostgreSQL | `postgres:18` | `localhost:5432` |
 | Valkey | `valkey/valkey:8` | `localhost:6379` |
 | Object storage | `chrislusf/seaweedfs` | `localhost:8333`, `s3.localhost` |
+| Webhooks | `hook0/hook0-api`, `hook0/hook0-output-worker` | `localhost:8081`, `hook0.localhost` |
+
+[Hook0](https://www.hook0.com) keeps its tables in their own schemas of the
+shared `postgres` database, which is why that service is PostgreSQL 18: Hook0
+needs 18 or later. A one-off `hook0-setup` container creates a `neptuno`
+organization and application, and every repo gets `HOOK0_API_URL`
+(`http://hook0:8081/api/v1`), `HOOK0_API_TOKEN` (the development master key set
+in `compose.yml`), `HOOK0_ORGANIZATION_ID` and `HOOK0_APPLICATION_ID`, so it can
+create event types and subscriptions and send events right away. The worker may
+deliver to private addresses, so endpoints such as `http://api:3000/webhooks`
+reach the repos' containers.
+
+Projects made before PostgreSQL 18 keep `postgres:17` until you change it.
+PostgreSQL 18 can't open a 17 data directory and mounts its volume at
+`/var/lib/postgresql` instead of `/var/lib/postgresql/data`, so dump your
+databases, move to the new image and mount, and restore them before adding
+Hook0 to such a project.
 
 ## Adding repos
 

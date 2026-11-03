@@ -30,7 +30,12 @@ func TestInitCreatesLayout(t *testing.T) {
 	for _, want := range []string{
 		"name: acme\n",
 		"image: caddy:2",
-		"image: postgres:17",
+		"image: postgres:18",
+		"postgres:/var/lib/postgresql\"]",
+		"image: hook0/hook0-api:1.0.2",
+		"DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres",
+		"image: hook0/hook0-output-worker:1.0.7",
+		"condition: service_completed_successfully",
 		"image: valkey/valkey:8",
 		"image: chrislusf/seaweedfs",
 		"./Caddyfile:/etc/caddy/Caddyfile:ro",
@@ -43,6 +48,15 @@ func TestInitCreatesLayout(t *testing.T) {
 	caddy := read(t, filepath.Join(dir, "Caddyfile"))
 	if !strings.Contains(caddy, "http://s3.localhost {\n\treverse_proxy s3:8333\n}") {
 		t.Errorf("Caddyfile missing s3 site block:\n%s", caddy)
+	}
+	if !strings.Contains(caddy, "http://hook0.localhost {\n\treverse_proxy hook0:8081\n}") {
+		t.Errorf("Caddyfile missing hook0 site block:\n%s", caddy)
+	}
+	env := read(t, filepath.Join(dir, "environments", "_shared", "base.env"))
+	for _, want := range []string{"HOOK0_API_URL=http://hook0:8081/api/v1", "HOOK0_API_TOKEN=", "HOOK0_APPLICATION_ID="} {
+		if !strings.Contains(env, want) {
+			t.Errorf("base.env missing %q:\n%s", want, env)
+		}
 	}
 
 	gitignore := read(t, filepath.Join(dir, ".gitignore"))
