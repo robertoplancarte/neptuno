@@ -15,7 +15,7 @@ Work from the outside in and stop at the first thing that is wrong.
    away usually failed in `dockerfiles/<repo>/entrypoint.sh` (gems,
    packages, migrations). Its processes wait for that setup and say so.
 3. **Dependencies.** `docker compose ps` for the services in its
-   `depends_on` (postgres, valkey, s3). Check the env the repo gets with
+   `depends_on` (postgres, valkey, s3, svix). Check the env the repo gets with
    `neptuno env show <repo>`: hosts must be service names such as
    `postgres`, not `localhost`, because the repo runs in its own container.
 4. **Processes.** Each Procfile line runs as
