@@ -19,12 +19,12 @@ go install github.com/robertoplancarte/neptuno/cmd/neptuno@latest
 ```sh
 neptuno init acme
 cd acme
-docker compose up -d   # Caddy, PostgreSQL 17, Valkey 8, SeaweedFS, Svix
+docker compose up -d   # Caddy, PostgreSQL 17, Valkey 8, SeaweedFS
 ```
 
 In a terminal, `neptuno init` first shows a checklist of the default shared
 services, all checked: uncheck the ones the project doesn't need. Services a
-chosen one needs come along (Svix brings PostgreSQL and Valkey). Scripts pass
+chosen one needs come along. Scripts pass
 `--services` to skip the checklist:
 
 ```sh
@@ -36,13 +36,13 @@ Run `neptuno init` again inside the project (or `neptuno init acme` next to
 it) to add default services you left out. It lists only the ones the project
 doesn't have, appends the picked ones to `compose.yml`, the `Caddyfile` and
 `environments/_shared/base.env`, and leaves existing services and your edits
-alone. `neptuno init --services svix` does the same without the checklist.
+alone. `neptuno init --services s3` does the same without the checklist.
 
 `neptuno init <name>` creates:
 
 ```
 acme/
-├── compose.yml      # yours to edit: proxy, postgres, valkey, s3, svix
+├── compose.yml      # yours to edit: proxy, postgres, valkey, s3
 ├── Caddyfile        # yours to edit: one http://<repo>.localhost block per repo
 ├── neptuno.yml      # optional project config
 ├── AGENTS.md        # tells coding agents in this folder how the project works
@@ -61,13 +61,6 @@ acme/
 | PostgreSQL | `postgres:17` | `localhost:5432` |
 | Valkey | `valkey/valkey:8` | `localhost:6379` |
 | Object storage | `chrislusf/seaweedfs` | `localhost:8333`, `s3.localhost` |
-| Webhooks | `svix/svix-server:v1` | `localhost:8071`, `svix.localhost` |
-
-Svix keeps its tables in the `postgres` database and its queue in Valkey.
-Every repo gets `SVIX_SERVER_URL=http://svix:8071` and a ready-made
-`SVIX_AUTH_TOKEN` for the API, signed with the development JWT secret in
-`compose.yml`. It may deliver webhooks to private addresses, so endpoints such
-as `http://api:3000/webhooks` reach the repos' containers.
 
 ## Adding repos
 

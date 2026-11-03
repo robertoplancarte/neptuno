@@ -33,9 +33,6 @@ func TestInitCreatesLayout(t *testing.T) {
 		"image: postgres:17",
 		"image: valkey/valkey:8",
 		"image: chrislusf/seaweedfs",
-		"image: svix/svix-server:v1",
-		"SVIX_DB_DSN: postgresql://postgres:postgres@postgres:5432/postgres",
-		"SVIX_REDIS_DSN: redis://valkey:6379",
 		"./Caddyfile:/etc/caddy/Caddyfile:ro",
 	} {
 		if !strings.Contains(compose, want) {
@@ -46,9 +43,6 @@ func TestInitCreatesLayout(t *testing.T) {
 	caddy := read(t, filepath.Join(dir, "Caddyfile"))
 	if !strings.Contains(caddy, "http://s3.localhost {\n\treverse_proxy s3:8333\n}") {
 		t.Errorf("Caddyfile missing s3 site block:\n%s", caddy)
-	}
-	if !strings.Contains(caddy, "http://svix.localhost {\n\treverse_proxy svix:8071\n}") {
-		t.Errorf("Caddyfile missing svix site block:\n%s", caddy)
 	}
 
 	gitignore := read(t, filepath.Join(dir, ".gitignore"))

@@ -108,39 +108,6 @@ DATABASE_PASSWORD=postgres
 		Site:    "http://s3.localhost {\n\treverse_proxy s3:8333\n}",
 		Env:     "S3_ENDPOINT=http://s3:8333\n",
 	},
-	{
-		Name:        "svix",
-		Title:       "Svix",
-		Description: "Svix webhook server (needs postgres and valkey)",
-		Address:     "svix:8071",
-		Hosts:       []string{"localhost:8071", "http://svix.localhost"},
-		Requires:    []string{"postgres", "valkey"},
-		Compose: `# Svix webhook server. It keeps its tables in postgres's default "postgres"
-# database and its queue and cache in valkey, so it adds no volume of its
-# own. Repos get SVIX_SERVER_URL and SVIX_AUTH_TOKEN from _shared/base.env.
-# Changing SVIX_JWT_SECRET makes that token invalid: generate a new one with
-# docker compose exec svix svix-server jwt generate
-svix:
-  image: svix/svix-server:v1
-  environment:
-    WAIT_FOR: "true"
-    SVIX_JWT_SECRET: neptuno-local-svix-jwt-secret
-    SVIX_DB_DSN: postgresql://postgres:postgres@postgres:5432/postgres
-    SVIX_REDIS_DSN: redis://valkey:6379
-    SVIX_QUEUE_TYPE: redis
-    SVIX_CACHE_TYPE: redis
-    # Let webhooks reach the repos' containers, which have private IPs.
-    SVIX_WHITELIST_SUBNETS: '["10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","127.0.0.0/8"]'
-  ports: ["8071:8071"]
-  depends_on: [postgres, valkey]
-`,
-		Site: "http://svix.localhost {\n\treverse_proxy svix:8071\n}",
-		Env: `# Svix webhook server. The token is signed with the dev SVIX_JWT_SECRET in
-# compose.yml; make a new one with: docker compose exec svix svix-server jwt generate
-SVIX_SERVER_URL=http://svix:8071
-SVIX_AUTH_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3OTM2NzEwNjYsImV4cCI6MjEwOTAzMTA2NiwibmJmIjoxNzkzNjcxMDY2LCJpc3MiOiJzdml4LXNlcnZlciIsInN1YiI6Im9yZ18yM3JiOFlkR3FNVDBxSXpwZ0d3ZFhmSGlyTXUifQ.h2K4HZ8sQqiMKKWfZzsqMXmGJWoMeVRklJoO37FBoL8
-`,
-	},
 }
 
 // DefaultServiceNames returns the names of DefaultServices, in order.
