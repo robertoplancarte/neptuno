@@ -76,13 +76,13 @@ func TestChecklist(t *testing.T) {
 	m := newChecklist(ChecklistOptions{
 		Title:        "Services",
 		Header:       "Services",
-		Names:        []string{"postgres", "valkey", "svix"},
-		Descriptions: map[string]string{"svix": "webhooks"},
+		Names:        []string{"postgres", "valkey", "hook0"},
+		Descriptions: map[string]string{"hook0": "webhooks"},
 		Preselected:  []string{"postgres"},
 		Action:       "create",
 		Closure: func(sel []string) ([]string, error) {
 			for _, s := range sel {
-				if s == "svix" {
+				if s == "hook0" {
 					return append(sel, "valkey"), nil
 				}
 			}
@@ -97,7 +97,7 @@ func TestChecklist(t *testing.T) {
 			t.Errorf("view missing %q:\n%s", want, view)
 		}
 	}
-	if got := m.Selection(); !reflect.DeepEqual(got, []string{"postgres", "svix"}) {
+	if got := m.Selection(); !reflect.DeepEqual(got, []string{"postgres", "hook0"}) {
 		t.Errorf("selection = %v", got)
 	}
 	press(m, "a", "a", "enter")

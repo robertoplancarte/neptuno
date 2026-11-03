@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -61,15 +62,17 @@ var DefaultServices = []Service{
 	{
 		Name:        "postgres",
 		Title:       "PostgreSQL",
-		Description: "PostgreSQL 17 database",
+		Description: "PostgreSQL 18 database",
 		Address:     "postgres:5432",
 		Hosts:       []string{"localhost:5432"},
+		// PostgreSQL 18 keeps its data under /var/lib/postgresql/18, so the
+		// volume mounts the parent directory rather than .../data.
 		Compose: `postgres:
-  image: postgres:17
+  image: postgres:18
   environment:
     POSTGRES_PASSWORD: postgres
   ports: ["5432:5432"]
-  volumes: ["postgres:/var/lib/postgresql/data"]
+  volumes: ["postgres:/var/lib/postgresql"]
 `,
 		Volumes: []string{"postgres"},
 		Env: `DATABASE_HOST=postgres
@@ -109,36 +112,71 @@ DATABASE_PASSWORD=postgres
 		Env:     "S3_ENDPOINT=http://s3:8333\n",
 	},
 	{
-		Name:        "svix",
-		Title:       "Svix",
-		Description: "Svix webhook server (needs postgres and valkey)",
-		Address:     "svix:8071",
-		Hosts:       []string{"localhost:8071", "http://svix.localhost"},
-		Requires:    []string{"postgres", "valkey"},
-		Compose: `# Svix webhook server. It keeps its tables in postgres's default "postgres"
-# database and its queue and cache in valkey, so it adds no volume of its
-# own. Repos get SVIX_SERVER_URL and SVIX_AUTH_TOKEN from _shared/base.env.
-# Changing SVIX_JWT_SECRET makes that token invalid: generate a new one with
-# docker compose exec svix svix-server jwt generate
-svix:
-  image: svix/svix-server:v1
+		Name:        "hook0",
+		Title:       "Hook0",
+		Description: "Hook0 webhook server (needs postgres)",
+		Address:     "hook0:8081",
+		Hosts:       []string{"localhost:8081", "http://hook0.localhost"},
+		Requires:    []string{"postgres"},
+		Compose: `# Hook0 webhook server: the API, a worker that delivers webhooks, and a
+# one-off step that creates the "neptuno" organization and application.
+# Hook0 keeps its tables in their own schemas of postgres's default
+# "postgres" database and needs PostgreSQL 18 or later. Repos get
+# HOOK0_API_URL, HOOK0_API_TOKEN and HOOK0_APPLICATION_ID from
+# _shared/base.env. HOOK0_API_TOKEN is MASTER_API_KEY below, which may do
+# anything: it is for development only.
+hook0:
+  image: hook0/hook0-api:1.0.2
   environment:
-    WAIT_FOR: "true"
-    SVIX_JWT_SECRET: neptuno-local-svix-jwt-secret
-    SVIX_DB_DSN: postgresql://postgres:postgres@postgres:5432/postgres
-    SVIX_REDIS_DSN: redis://valkey:6379
-    SVIX_QUEUE_TYPE: redis
-    SVIX_CACHE_TYPE: redis
+    IP: 0.0.0.0
+    PORT: "8081"
+    DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres
+    APP_URL: http://hook0.localhost
+    CORS_ALLOWED_ORIGINS: http://hook0.localhost
+    BISCUIT_PRIVATE_KEY: 56ca432f9796d907ed2e7b9370e7caf6d02d6f3979f711e67b5462ba5c4fbc39
+    MASTER_API_KEY: 0e070000-0000-4000-8000-00000000000f
+    # Hook0 mails only for its dashboard's sign-ups; nothing listens here.
+    SMTP_CONNECTION_URL: smtp://localhost:25
+    EMAIL_SENDER_ADDRESS: hook0@neptuno.localhost
+  ports: ["8081:8081"]
+  depends_on: [postgres]
+hook0-setup:
+  image: postgres:18
+  environment:
+    PGHOST: postgres
+    PGUSER: postgres
+    PGPASSWORD: postgres
+  # Waits for the API to create its tables, then adds the organization and
+  # application whose ids repos get. Running it again changes nothing.
+  command:
+    - sh
+    - -c
+    - |
+      until psql -qtc "select 1 from event.application limit 0" >/dev/null 2>&1; do sleep 1; done
+      psql -v ON_ERROR_STOP=1 -qc "
+        insert into iam.organization (organization__id, name)
+          values ('0e070000-0000-4000-8000-000000000001', 'neptuno') on conflict do nothing;
+        insert into event.application (application__id, organization__id, name)
+          values ('0e070000-0000-4000-8000-000000000002', '0e070000-0000-4000-8000-000000000001', 'neptuno')
+          on conflict do nothing;"
+  depends_on: [hook0]
+hook0-worker:
+  image: hook0/hook0-output-worker:1.0.7
+  environment:
+    DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres
+    WORKER_NAME: default
     # Let webhooks reach the repos' containers, which have private IPs.
-    SVIX_WHITELIST_SUBNETS: '["10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","127.0.0.0/8"]'
-  ports: ["8071:8071"]
-  depends_on: [postgres, valkey]
+    DISABLE_TARGET_IP_CHECK: "true"
+  depends_on:
+    hook0-setup:
+      condition: service_completed_successfully
 `,
-		Site: "http://svix.localhost {\n\treverse_proxy svix:8071\n}",
-		Env: `# Svix webhook server. The token is signed with the dev SVIX_JWT_SECRET in
-# compose.yml; make a new one with: docker compose exec svix svix-server jwt generate
-SVIX_SERVER_URL=http://svix:8071
-SVIX_AUTH_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3OTM2NzEwNjYsImV4cCI6MjEwOTAzMTA2NiwibmJmIjoxNzkzNjcxMDY2LCJpc3MiOiJzdml4LXNlcnZlciIsInN1YiI6Im9yZ18yM3JiOFlkR3FNVDBxSXpwZ0d3ZFhmSGlyTXUifQ.h2K4HZ8sQqiMKKWfZzsqMXmGJWoMeVRklJoO37FBoL8
+		Site: "http://hook0.localhost {\n\treverse_proxy hook0:8081\n}",
+		Env: `# Hook0 webhook server. The token is MASTER_API_KEY in compose.yml.
+HOOK0_API_URL=http://hook0:8081/api/v1
+HOOK0_API_TOKEN=0e070000-0000-4000-8000-00000000000f
+HOOK0_ORGANIZATION_ID=0e070000-0000-4000-8000-000000000001
+HOOK0_APPLICATION_ID=0e070000-0000-4000-8000-000000000002
 `,
 	},
 }
@@ -287,6 +325,9 @@ func AddServices(root string, names []string) ([]string, error) {
 	if err := os.WriteFile(composePath, compose, 0o644); err != nil {
 		return nil, err
 	}
+	if m := oldPostgres.FindSubmatch(compose); m != nil && slices.ContainsFunc(todo, func(s Service) bool { return s.Name == "hook0" }) {
+		log = append(log, "note    hook0 needs PostgreSQL 18 or later, and compose.yml's postgres is "+string(m[1])+"; upgrade it before starting hook0")
+	}
 
 	if added, err := appendCaddySites(filepath.Join(root, "Caddyfile"), todo); err != nil {
 		return log, err
@@ -297,6 +338,9 @@ func AddServices(root string, names []string) ([]string, error) {
 	log = append(log, added...)
 	return log, err
 }
+
+// oldPostgres matches a postgres image older than 18, which Hook0 can't use.
+var oldPostgres = regexp.MustCompile(`(?m)^\s*image:\s*["']?(postgres:(?:9|1[0-7])\b[^\s"']*)`)
 
 // appendCaddySites adds the services' sites to the Caddyfile unless it has
 // them, or does nothing when the project has no Caddyfile.

@@ -30,12 +30,14 @@ func TestInitCreatesLayout(t *testing.T) {
 	for _, want := range []string{
 		"name: acme\n",
 		"image: caddy:2",
-		"image: postgres:17",
+		"image: postgres:18",
+		"postgres:/var/lib/postgresql\"]",
+		"image: hook0/hook0-api:1.0.2",
+		"DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres",
+		"image: hook0/hook0-output-worker:1.0.7",
+		"condition: service_completed_successfully",
 		"image: valkey/valkey:8",
 		"image: chrislusf/seaweedfs",
-		"image: svix/svix-server:v1",
-		"SVIX_DB_DSN: postgresql://postgres:postgres@postgres:5432/postgres",
-		"SVIX_REDIS_DSN: redis://valkey:6379",
 		"./Caddyfile:/etc/caddy/Caddyfile:ro",
 	} {
 		if !strings.Contains(compose, want) {
@@ -47,8 +49,14 @@ func TestInitCreatesLayout(t *testing.T) {
 	if !strings.Contains(caddy, "http://s3.localhost {\n\treverse_proxy s3:8333\n}") {
 		t.Errorf("Caddyfile missing s3 site block:\n%s", caddy)
 	}
-	if !strings.Contains(caddy, "http://svix.localhost {\n\treverse_proxy svix:8071\n}") {
-		t.Errorf("Caddyfile missing svix site block:\n%s", caddy)
+	if !strings.Contains(caddy, "http://hook0.localhost {\n\treverse_proxy hook0:8081\n}") {
+		t.Errorf("Caddyfile missing hook0 site block:\n%s", caddy)
+	}
+	env := read(t, filepath.Join(dir, "environments", "_shared", "base.env"))
+	for _, want := range []string{"HOOK0_API_URL=http://hook0:8081/api/v1", "HOOK0_API_TOKEN=", "HOOK0_APPLICATION_ID="} {
+		if !strings.Contains(env, want) {
+			t.Errorf("base.env missing %q:\n%s", want, env)
+		}
 	}
 
 	gitignore := read(t, filepath.Join(dir, ".gitignore"))

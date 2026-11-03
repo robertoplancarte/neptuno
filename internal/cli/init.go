@@ -41,7 +41,7 @@ func newInitCommand() *cobra.Command {
 			"  neptuno init acme --services postgres,valkey\n" +
 			"  neptuno init acme --services=               # only the proxy\n" +
 			"  neptuno init                                # in a project: add services it lacks\n" +
-			"  neptuno init --services svix                # in a project: add svix (and what it needs)",
+			"  neptuno init --services s3                  # in a project: add s3 (and what it needs)",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			chosen := services

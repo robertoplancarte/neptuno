@@ -9,7 +9,7 @@ import (
 )
 
 func TestResolveServices(t *testing.T) {
-	chosen, required, err := ResolveServices([]string{"svix", "s3"})
+	chosen, required, err := ResolveServices([]string{"hook0", "s3"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -17,10 +17,10 @@ func TestResolveServices(t *testing.T) {
 	for _, s := range chosen {
 		names = append(names, s.Name)
 	}
-	if got := strings.Join(names, ","); got != "postgres,valkey,s3,svix" {
-		t.Errorf("chosen = %s, want menu order with svix's requirements", got)
+	if got := strings.Join(names, ","); got != "postgres,s3,hook0" {
+		t.Errorf("chosen = %s, want menu order with hook0's requirements", got)
 	}
-	if got := strings.Join(required, ","); got != "postgres,valkey" {
+	if got := strings.Join(required, ","); got != "postgres" {
 		t.Errorf("required = %s", got)
 	}
 	if _, _, err := ResolveServices([]string{"mysql"}); !errors.Is(err, ErrUnknownService) {
@@ -41,19 +41,34 @@ func TestInitWithSomeServices(t *testing.T) {
 		t.Errorf("AGENTS.md lists the wrong services:\n%s", agents)
 	}
 
-	log, err := AddServices(dir, []string{"svix"})
+	log, err := AddServices(dir, []string{"hook0"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if have, _ := ExistingServices(dir); strings.Join(have, ",") != "postgres,valkey,svix" {
+	if have, _ := ExistingServices(dir); strings.Join(have, ",") != "postgres,valkey,hook0" {
 		t.Errorf("after add: %v (log %q)", have, log)
 	}
 	// Running it again changes nothing.
 	before, _ := os.ReadFile(filepath.Join(dir, "compose.yml"))
-	if _, err := AddServices(dir, []string{"svix"}); err != nil {
+	if _, err := AddServices(dir, []string{"hook0"}); err != nil {
 		t.Fatal(err)
 	}
 	if after := read(t, filepath.Join(dir, "compose.yml")); after != string(before) {
 		t.Errorf("second add changed compose.yml")
+	}
+}
+
+func TestAddHook0WarnsAboutOldPostgres(t *testing.T) {
+	dir := t.TempDir()
+	compose := "services:\n  postgres:\n    image: postgres:17\n"
+	if err := os.WriteFile(filepath.Join(dir, "compose.yml"), []byte(compose), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	log, err := AddServices(dir, []string{"hook0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(log, "\n"); !strings.Contains(got, "hook0 needs PostgreSQL 18 or later, and compose.yml's postgres is postgres:17") {
+		t.Errorf("log = %s", got)
 	}
 }
