@@ -217,30 +217,33 @@ func TestRailsOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(s.OptionNames(), ","); got != "action_text,storage_s3,tailwind" {
+	if got := strings.Join(s.OptionNames(), ","); got != "action_text,mailpit,storage_s3,tailwind" {
 		t.Errorf("options = %s", got)
 	}
 
-	// Defaults: tailwind only.
+	// Defaults: mailpit and tailwind.
 	data, err := s.Select(Data{Name: "shop", Port: 3000}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	gen, _ := s.GenerateCommand(data)
-	if !strings.HasSuffix(gen, "--skip-thruster --css=tailwind") {
+	if !strings.Contains(gen, "--skip-thruster --css=tailwind) && (sed -i") {
 		t.Errorf("default generate = %s", gen)
+	}
+	if got := strings.Join(s.ServicesFor(data), ","); got != "postgres,valkey,s3,mailpit" {
+		t.Errorf("default services = %s", got)
 	}
 	proc, _ := s.Render("Procfile", data)
 	if !strings.Contains(string(proc), "\ncss: bin/rails tailwindcss:watch\n") {
 		t.Errorf("Procfile:\n%s", proc)
 	}
 
-	data, err = s.Select(Data{Name: "shop", Port: 3000}, []string{"action_text", "storage_s3"}, []string{"tailwind"})
+	data, err = s.Select(Data{Name: "shop", Port: 3000}, []string{"action_text", "storage_s3"}, []string{"mailpit", "tailwind"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	gen, _ = s.GenerateCommand(data)
-	if strings.Contains(gen, "tailwind") || !strings.Contains(gen, ") && (bin/rails action_text:install) && (bundle add aws-sdk-s3") {
+	if strings.Contains(gen, "tailwind") || strings.Contains(gen, "mailpit") || !strings.Contains(gen, ") && (bin/rails action_text:install) && (bundle add aws-sdk-s3") {
 		t.Errorf("generate = %s", gen)
 	}
 	if out, err := exec.Command("sh", "-n", "-c", gen).CombinedOutput(); err != nil {
@@ -255,7 +258,7 @@ func TestRailsOptions(t *testing.T) {
 		t.Errorf("Procfile has tailwind although it is off:\n%s", proc)
 	}
 
-	if _, err := s.Select(Data{}, []string{"sidekiq"}, nil); err == nil || !strings.Contains(err.Error(), "options: action_text, storage_s3, tailwind") {
+	if _, err := s.Select(Data{}, []string{"sidekiq"}, nil); err == nil || !strings.Contains(err.Error(), "options: action_text, mailpit, storage_s3, tailwind") {
 		t.Errorf("unknown option error = %v", err)
 	}
 }
@@ -269,7 +272,7 @@ func TestOptionsMergeThroughExtends(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(s.OptionNames(), ","); got != "action_text,sidekiq,storage_s3,tailwind" {
+	if got := strings.Join(s.OptionNames(), ","); got != "action_text,mailpit,sidekiq,storage_s3,tailwind" {
 		t.Errorf("options = %s", got)
 	}
 	data, _ := s.Select(Data{Name: "shop"}, []string{"sidekiq"}, nil)
@@ -291,7 +294,83 @@ func TestOptionsMergeThroughExtends(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(c.OptionNames(), ","); got != "action_text,sidekiq,storage_s3,tailwind" {
+	if got := strings.Join(c.OptionNames(), ","); got != "action_text,mailpit,sidekiq,storage_s3,tailwind" {
 		t.Errorf("copied options = %s", got)
+	}
+}
+
+// The mailpit option edits the development.rb that rails new 8.1 writes.
+func TestRailsMailpitOption(t *testing.T) {
+	s, err := Get("", "rails")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mailpit *Option
+	for _, o := range s.Options {
+		if o.Name == "mailpit" {
+			mailpit = o
+		}
+	}
+	if mailpit == nil || !mailpit.Default || strings.Join(mailpit.Services, ",") != "mailpit" {
+		t.Fatalf("mailpit option = %+v", mailpit)
+	}
+	data, err := s.Select(Data{Name: "shop", Port: 3000}, nil, []string{"tailwind"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gen, err := s.GenerateCommand(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := gen[strings.Index(gen, ") && (")+len(") && "):]
+
+	dir := t.TempDir()
+	rb := filepath.Join(dir, "config/environments/development.rb")
+	if err := os.MkdirAll(filepath.Dir(rb), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	original := `Rails.application.configure do
+  # Set localhost to be used by links generated in mailer templates.
+  config.action_mailer.default_url_options = { host: "localhost", port: 3000 }
+
+  # Print deprecation notices to the Rails logger.
+  config.active_support.deprecation = :log
+end
+`
+	if err := os.WriteFile(rb, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := func() ([]byte, error) {
+		cmd := exec.Command("sh", "-c", after)
+		cmd.Dir = dir
+		return cmd.CombinedOutput()
+	}
+	if out, err := run(); err != nil {
+		t.Fatalf("%s: %v\n%s", after, err, out)
+	}
+	got, _ := os.ReadFile(rb)
+	want := `Rails.application.configure do
+  # Set localhost to be used by links generated in mailer templates.
+  config.action_mailer.default_url_options = { host: "shop.localhost" }
+
+  # Deliver over SMTP to Mailpit, which keeps every mail and shows it at
+  # http://mailpit.localhost. Compose gives the repo SMTP_HOST and SMTP_PORT.
+  config.action_mailer.delivery_method = :smtp
+  config.action_mailer.smtp_settings = { address: ENV.fetch("SMTP_HOST", "localhost"), port: ENV.fetch("SMTP_PORT", "1025").to_i }
+
+  # Print deprecation notices to the Rails logger.
+  config.active_support.deprecation = :log
+end
+`
+	if string(got) != want {
+		t.Errorf("development.rb:\n%s", got)
+	}
+
+	// Without the line it edits, the command fails instead of doing nothing.
+	if err := os.WriteFile(rb, []byte("Rails.application.configure do\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(); err == nil {
+		t.Error("succeeded on a development.rb without default_url_options")
 	}
 }

@@ -45,15 +45,15 @@ func TestAddFormBuildsTheAddCommand(t *testing.T) {
 	if !m.form.on["tailwind"] || m.form.on["action_text"] {
 		t.Errorf("rails options did not start at their defaults: %v", m.form.on)
 	}
-	// Options are sorted by name: action_text, storage_s3, tailwind.
-	key(m, "down", " ", "down", "down", " ")
+	// Options are sorted by name: action_text, mailpit, storage_s3, tailwind.
+	key(m, "down", " ", "down", "down", "down", " ")
 	view := m.View()
 	for _, want := range []string{"Add a repo", "shop", "rails", "[x] action_text", "[ ] tailwind", "Active Storage"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("form view missing %q:\n%s", want, view)
 		}
 	}
-	want := []string{"add", "shop", "git@github.com:acme/shop.git", "--stack", "rails", "--with", "action_text", "--without", "storage_s3,tailwind"}
+	want := []string{"add", "shop", "git@github.com:acme/shop.git", "--stack", "rails", "--with", "action_text,mailpit", "--without", "storage_s3,tailwind"}
 	if got := m.form.args(); !reflect.DeepEqual(got, want) {
 		t.Errorf("args = %q\nwant   %q", got, want)
 	}
