@@ -19,12 +19,12 @@ go install github.com/robertoplancarte/neptuno/cmd/neptuno@latest
 ```sh
 neptuno init acme
 cd acme
-docker compose up -d   # Caddy, PostgreSQL 18, Valkey 8, SeaweedFS, Hook0
+docker compose up -d   # Caddy, PostgreSQL 18, Valkey 8, SeaweedFS, Mailpit, Hook0
 ```
 
 In a terminal, `neptuno init` first shows a checklist of the default shared
 services, all checked: uncheck the ones the project doesn't need. Services a
-chosen one needs come along (Hook0 brings PostgreSQL). Scripts pass
+chosen one needs come along (Hook0 brings PostgreSQL and Mailpit). Scripts pass
 `--services` to skip the checklist:
 
 ```sh
@@ -42,7 +42,7 @@ alone. `neptuno init --services hook0` does the same without the checklist.
 
 ```
 acme/
-├── compose.yml      # yours to edit: proxy, postgres, valkey, s3, hook0
+├── compose.yml      # yours to edit: proxy, postgres, valkey, s3, mailpit, hook0
 ├── Caddyfile        # yours to edit: one http://<repo>.localhost block per repo
 ├── neptuno.yml      # optional project config
 ├── AGENTS.md        # tells coding agents in this folder how the project works
@@ -61,7 +61,8 @@ acme/
 | PostgreSQL | `postgres:18` | `localhost:5432` |
 | Valkey | `valkey/valkey:8` | `localhost:6379` |
 | Object storage | `chrislusf/seaweedfs` | `localhost:8333`, `s3.localhost` |
-| Webhooks | `hook0/hook0-api`, `hook0/hook0-output-worker` | `localhost:8081`, `hook0.localhost` |
+| Mail catcher | `axllent/mailpit:v1` | SMTP `localhost:1025`, inbox `localhost:8025`, `mailpit.localhost` |
+| Webhooks | `hook0/hook0-api`, `hook0/hook0-output-worker`, `hook0/hook0-frontend` | API `localhost:8081`, dashboard `hook0.localhost` |
 
 [Hook0](https://www.hook0.com) keeps its tables in their own schemas of the
 shared `postgres` database, which is why that service is PostgreSQL 18: Hook0
@@ -72,6 +73,13 @@ in `compose.yml`), `HOOK0_ORGANIZATION_ID` and `HOOK0_APPLICATION_ID`, so it can
 create event types and subscriptions and send events right away. The worker may
 deliver to private addresses, so endpoints such as `http://api:3000/webhooks`
 reach the repos' containers.
+
+Mailpit keeps every mail sent to it and shows it at `http://mailpit.localhost`;
+repos get `SMTP_HOST=mailpit` and `SMTP_PORT=1025`. Hook0 sends its mail
+there too. To use the Hook0 dashboard, sign up at `http://hook0.localhost`,
+open the confirmation mail in Mailpit, and log in: everyone who signs up joins
+the `neptuno` organization, so the dashboard shows the repos' event types,
+subscriptions, events and deliveries.
 
 Projects made before PostgreSQL 18 keep `postgres:17` until you change it.
 PostgreSQL 18 can't open a 17 data directory and mounts its volume at

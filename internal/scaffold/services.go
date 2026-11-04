@@ -112,19 +112,43 @@ DATABASE_PASSWORD=postgres
 		Env:     "S3_ENDPOINT=http://s3:8333\n",
 	},
 	{
+		Name:        "mailpit",
+		Title:       "Mailpit",
+		Description: "Mailpit, an SMTP server that catches mail and shows it in a web inbox",
+		Address:     "mailpit:1025",
+		Hosts:       []string{"localhost:1025", "localhost:8025", "http://mailpit.localhost"},
+		Compose: `# Mailpit catches every mail sent to it and shows it at
+# http://mailpit.localhost; nothing leaves this machine.
+mailpit:
+  image: axllent/mailpit:v1
+  environment:
+    MP_DATABASE: /data/mailpit.db
+  ports: ["1025:1025", "8025:8025"]
+  volumes: ["mailpit:/data"]
+`,
+		Volumes: []string{"mailpit"},
+		Site:    "http://mailpit.localhost {\n\treverse_proxy mailpit:8025\n}",
+		Env: `SMTP_HOST=mailpit
+SMTP_PORT=1025
+`,
+	},
+	{
 		Name:        "hook0",
 		Title:       "Hook0",
-		Description: "Hook0 webhook server (needs postgres)",
+		Description: "Hook0 webhook server and dashboard (needs postgres and mailpit)",
 		Address:     "hook0:8081",
 		Hosts:       []string{"localhost:8081", "http://hook0.localhost"},
-		Requires:    []string{"postgres"},
-		Compose: `# Hook0 webhook server: the API, a worker that delivers webhooks, and a
-# one-off step that creates the "neptuno" organization and application.
+		Requires:    []string{"postgres", "mailpit"},
+		Compose: `# Hook0 webhook server: the API, a worker that delivers webhooks, the
+# dashboard at http://hook0.localhost, and a one-off step that creates the
+# "neptuno" organization and application.
 # Hook0 keeps its tables in their own schemas of postgres's default
 # "postgres" database and needs PostgreSQL 18 or later. Repos get
 # HOOK0_API_URL, HOOK0_API_TOKEN and HOOK0_APPLICATION_ID from
 # _shared/base.env. HOOK0_API_TOKEN is MASTER_API_KEY below, which may do
-# anything: it is for development only.
+# anything: it is for development only. To use the dashboard, sign up at
+# http://hook0.localhost and open the confirmation mail in Mailpit, at
+# http://mailpit.localhost.
 hook0:
   image: hook0/hook0-api:1.0.2
   environment:
@@ -135,11 +159,16 @@ hook0:
     CORS_ALLOWED_ORIGINS: http://hook0.localhost
     BISCUIT_PRIVATE_KEY: 56ca432f9796d907ed2e7b9370e7caf6d02d6f3979f711e67b5462ba5c4fbc39
     MASTER_API_KEY: 0e070000-0000-4000-8000-00000000000f
-    # Hook0 mails only for its dashboard's sign-ups; nothing listens here.
-    SMTP_CONNECTION_URL: smtp://localhost:25
+    SMTP_CONNECTION_URL: smtp://mailpit:1025
     EMAIL_SENDER_ADDRESS: hook0@neptuno.localhost
   ports: ["8081:8081"]
-  depends_on: [postgres]
+  depends_on: [postgres, mailpit]
+hook0-dashboard:
+  image: hook0/hook0-frontend:1.2.1
+  environment:
+    # The browser calls the API through the proxy, on the dashboard's origin.
+    API_ENDPOINT: http://hook0.localhost/api/v1
+  depends_on: [hook0]
 hook0-setup:
   image: postgres:18
   environment:
@@ -147,7 +176,8 @@ hook0-setup:
     PGUSER: postgres
     PGPASSWORD: postgres
   # Waits for the API to create its tables, then adds the organization and
-  # application whose ids repos get. Running it again changes nothing.
+  # application whose ids repos get, and makes everyone who signs up to the
+  # dashboard a member. Running it again changes nothing.
   command:
     - sh
     - -c
@@ -158,6 +188,19 @@ hook0-setup:
           values ('0e070000-0000-4000-8000-000000000001', 'neptuno') on conflict do nothing;
         insert into event.application (application__id, organization__id, name)
           values ('0e070000-0000-4000-8000-000000000002', '0e070000-0000-4000-8000-000000000001', 'neptuno')
+          on conflict do nothing;
+        -- Everyone who signs up to the dashboard joins the neptuno organization.
+        create or replace function public.neptuno_join_org() returns trigger language plpgsql as '
+          begin
+            insert into iam.user__organization (user__id, organization__id, role)
+              values (new.user__id, ''0e070000-0000-4000-8000-000000000001'', ''editor'')
+              on conflict do nothing;
+            return null;
+          end';
+        create or replace trigger neptuno_join_org after insert on iam.user
+          for each row execute function public.neptuno_join_org();
+        insert into iam.user__organization (user__id, organization__id, role)
+          select user__id, '0e070000-0000-4000-8000-000000000001', 'editor' from iam.user
           on conflict do nothing;"
   depends_on: [hook0]
 hook0-worker:
@@ -171,7 +214,7 @@ hook0-worker:
     hook0-setup:
       condition: service_completed_successfully
 `,
-		Site: "http://hook0.localhost {\n\treverse_proxy hook0:8081\n}",
+		Site: "http://hook0.localhost {\n\treverse_proxy /api/* hook0:8081\n\treverse_proxy hook0-dashboard:80\n}",
 		Env: `# Hook0 webhook server. The token is MASTER_API_KEY in compose.yml.
 HOOK0_API_URL=http://hook0:8081/api/v1
 HOOK0_API_TOKEN=0e070000-0000-4000-8000-00000000000f

@@ -73,11 +73,11 @@ func TestInitServicesFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("init: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "Adding postgres too") || !strings.Contains(out, "with proxy, postgres, hook0") {
+	if !strings.Contains(out, "Adding postgres, mailpit too") || !strings.Contains(out, "with proxy, postgres, mailpit, hook0") {
 		t.Errorf("output doesn't explain the services:\n%s", out)
 	}
 	compose := readFile(t, "acme/compose.yml")
-	for _, want := range []string{"image: caddy:2", "image: postgres:18", "image: hook0/hook0-api:1.0.2", "image: hook0/hook0-output-worker:1.0.7", "  hook0-setup:\n"} {
+	for _, want := range []string{"image: caddy:2", "image: postgres:18", "image: hook0/hook0-api:1.0.2", "image: hook0/hook0-output-worker:1.0.7", "image: hook0/hook0-frontend:1.2.1", "image: axllent/mailpit:v1", "  hook0-setup:\n"} {
 		if !strings.Contains(compose, want) {
 			t.Errorf("compose.yml missing %q", want)
 		}
@@ -172,8 +172,8 @@ func TestInitMenu(t *testing.T) {
 			}
 			return []string{"postgres"}, nil
 		}
-		if deps, _ := opts.Closure([]string{"hook0"}); strings.Join(deps, ",") != "hook0" {
-			t.Errorf("closure = %v, want hook0 (postgres is there)", deps)
+		if deps, _ := opts.Closure([]string{"hook0"}); strings.Join(deps, ",") != "mailpit,hook0" {
+			t.Errorf("closure = %v, want mailpit,hook0 (postgres is there)", deps)
 		}
 		return []string{"hook0"}, nil
 	}
@@ -183,7 +183,7 @@ func TestInitMenu(t *testing.T) {
 	if _, err := createAndAdd(t, root); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(offered[1], ",") != "valkey,s3,hook0" {
+	if strings.Join(offered[1], ",") != "valkey,s3,mailpit,hook0" {
 		t.Errorf("second menu offered %v, want the missing services", offered[1])
 	}
 	if got := readFile(t, "acme/compose.yml"); !strings.Contains(got, "hook0:") || strings.Contains(got, "seaweedfs") {

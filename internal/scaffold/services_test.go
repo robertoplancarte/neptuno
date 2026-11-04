@@ -17,10 +17,10 @@ func TestResolveServices(t *testing.T) {
 	for _, s := range chosen {
 		names = append(names, s.Name)
 	}
-	if got := strings.Join(names, ","); got != "postgres,s3,hook0" {
+	if got := strings.Join(names, ","); got != "postgres,s3,mailpit,hook0" {
 		t.Errorf("chosen = %s, want menu order with hook0's requirements", got)
 	}
-	if got := strings.Join(required, ","); got != "postgres" {
+	if got := strings.Join(required, ","); got != "postgres,mailpit" {
 		t.Errorf("required = %s", got)
 	}
 	if _, _, err := ResolveServices([]string{"mysql"}); !errors.Is(err, ErrUnknownService) {
@@ -45,7 +45,7 @@ func TestInitWithSomeServices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if have, _ := ExistingServices(dir); strings.Join(have, ",") != "postgres,valkey,hook0" {
+	if have, _ := ExistingServices(dir); strings.Join(have, ",") != "postgres,valkey,mailpit,hook0" {
 		t.Errorf("after add: %v (log %q)", have, log)
 	}
 	// Running it again changes nothing.
