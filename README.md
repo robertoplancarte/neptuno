@@ -147,6 +147,7 @@ them with `--with` and `--without`). The `rails` stack has:
 | Option | Default | What it does |
 | --- | --- | --- |
 | `tailwind` | on | `rails new --css=tailwind` and a `css: bin/rails tailwindcss:watch` process |
+| `mailpit` | on | Action Mailer in development delivers over SMTP to the project's Mailpit (`SMTP_HOST`, `SMTP_PORT`), so mail shows at `http://mailpit.localhost`; mail links point at `http://<name>.localhost` |
 | `action_text` | off | runs `bin/rails action_text:install` |
 | `storage_s3` | off | stores Active Storage uploads in the project's SeaweedFS: adds `aws-sdk-s3`, a `seaweedfs` service in `config/storage.yml`, the S3 env vars, and creates the bucket at container start |
 
