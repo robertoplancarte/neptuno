@@ -322,8 +322,8 @@ example `environments/shop/me.local.env`), and every container start drops the
 database, migrates and seeds it. For a one-off reset, run
 `neptuno up shop --set NEPTUNO_RESET_DB=1`. When `neptuno add` generates a
 new app over a database an earlier app of the same name left, the first start
-renames the old one to `<name>_development_old_<time>` instead of failing on
-tables that already exist.
+renames its old development and test databases (named in `config/database.yml`)
+to `<database>_old_<time>` instead of failing on tables that already exist.
 Rebuild the image (`docker compose build <repo>`) after changing it.
 
 ## Dashboard

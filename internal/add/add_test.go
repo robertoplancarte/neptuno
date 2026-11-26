@@ -291,3 +291,27 @@ func TestAddWithPlaywrightAddsTheService(t *testing.T) {
 		t.Error("playwright added without the option")
 	}
 }
+
+// The rails stack names no database in a variable every process gets: tests
+// would otherwise run against the development database. A project made
+// before postgres had PGHOST gets it, and its own edits stay.
+func TestAddRailsUsesLibpqVariablesNotADatabaseName(t *testing.T) {
+	a, _ := newAdder(t)
+	root := a.Project.Root
+	shared := filepath.Join(root, "environments/_shared/base.env")
+	old := strings.Replace(read(t, shared), "PGHOST=postgres\n", "", 1)
+	old = strings.Replace(old, "PGPORT=5432\n", "PGPORT=6543\n", 1)
+	if err := os.WriteFile(shared, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Add(Options{Name: "shop", Stack: "rails", NoGenerate: true}); err != nil {
+		t.Fatal(err)
+	}
+	if env := read(t, filepath.Join(root, "environments/shop/base.env")); strings.Contains(env, "DATABASE_URL=") || strings.Contains(env, "_development\n") {
+		t.Errorf("rails base.env names a database:\n%s", env)
+	}
+	env := read(t, shared)
+	if strings.Count(env, "PGHOST=postgres\n") != 1 || !strings.Contains(env, "PGPORT=6543\n") || strings.Contains(env, "PGPORT=5432") {
+		t.Errorf("_shared/base.env not backfilled, or an edit was lost:\n%s", env)
+	}
+}

@@ -87,10 +87,18 @@ var DefaultServices = []Service{
   volumes: ["postgres:/var/lib/postgresql"]
 `,
 		Volumes: []string{"postgres"},
+		// The PG* variables are libpq's own, which the pg gem, psql, psycopg,
+		// node-postgres and pgx read. They say where the server is but name
+		// no database, so each of an app's environments (development, test,
+		// Rails' cache and queue databases...) keeps its own database name.
 		Env: `DATABASE_HOST=postgres
 DATABASE_PORT=5432
 DATABASE_USER=postgres
 DATABASE_PASSWORD=postgres
+PGHOST=postgres
+PGPORT=5432
+PGUSER=postgres
+PGPASSWORD=postgres
 `,
 	},
 	{
@@ -463,6 +471,21 @@ func AddServices(root string, names []string) ([]string, error) {
 
 // oldPostgres matches a postgres image older than 18, which Hook0 can't use.
 var oldPostgres = regexp.MustCompile(`(?m)^\s*image:\s*["']?(postgres:(?:9|1[0-7])\b[^\s"']*)`)
+
+// BackfillEnv adds to environments/_shared/base.env the variables of the
+// named services that it doesn't set yet, such as ones a newer Neptuno gives
+// a service the project already has. Variables the file sets are left alone,
+// and names that aren't DefaultServices are skipped. It returns what it did,
+// one line per service.
+func BackfillEnv(root string, names []string) ([]string, error) {
+	var services []Service
+	for _, n := range names {
+		if s, ok := lookupService(n); ok {
+			services = append(services, s)
+		}
+	}
+	return appendEnv(filepath.Join(root, "environments", "_shared", "base.env"), services)
+}
 
 // appendCaddySites adds the services' sites to the Caddyfile unless it has
 // them, or does nothing when the project has no Caddyfile.
