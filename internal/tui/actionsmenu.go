@@ -32,6 +32,13 @@ func (m *dashboard) availableActions() []menuAction {
 		add("n", "Add a repo", "")
 		return list
 	}
+	if t, ok := m.currentTrace(); ok {
+		add("enter", "Open "+traceTest(t)+" in Playwright's Trace Viewer", m.playwrightDown())
+		add("y", "Copy the Trace Viewer link", "")
+		add("f", "Refresh the lists", "")
+		add("n", "Add a repo", "")
+		return list
+	}
 	r, ok := m.current()
 	if !ok {
 		add("n", "Add a repo", "")
@@ -117,6 +124,8 @@ func (m *dashboard) actionsView() string {
 	subject := "the project"
 	if v, ok := m.currentVolume(); ok {
 		subject = v.Name
+	} else if t, ok := m.currentTrace(); ok {
+		subject = traceTest(t)
 	} else if r, ok := m.current(); ok {
 		subject = r.Name
 	}

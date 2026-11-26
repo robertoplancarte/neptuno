@@ -58,6 +58,11 @@ type DashboardOptions struct {
 	// HostWarnings reports overmind daemons on the host that should not be
 	// running, for the project panel. It runs off the UI goroutine.
 	HostWarnings func() []string
+	// Traces lists the Playwright traces of the repos that use Playwright,
+	// newest first, for the Traces list. It runs off the UI goroutine.
+	Traces func() ([]orchestrate.Trace, error)
+	// OpenURL opens a link in the browser. Nil uses open, or xdg-open.
+	OpenURL func(url string) error
 }
 
 type (
@@ -113,6 +118,10 @@ type dashboard struct {
 	volumes    []orchestrate.Volume
 	volumesErr error
 	confirm    string
+	// traces are the Playwright traces once loaded, which the cursor
+	// reaches after the volumes while a repo uses Playwright.
+	traces    []orchestrate.Trace
+	tracesErr error
 	// form is the open add-repo form, or nil, and focus a repo just added
 	// that the cursor moves to once the status lists it.
 	form  *addForm
@@ -178,7 +187,7 @@ func (m *dashboard) refresh() tea.Cmd {
 	}
 	m.loading = true
 	status := m.opts.Status
-	cmds := []tea.Cmd{func() tea.Msg { return statusMsg(status()) }, m.loadVolumes()}
+	cmds := []tea.Cmd{func() tea.Msg { return statusMsg(status()) }, m.loadVolumes(), m.loadTraces()}
 	if summary := m.opts.MCP; summary != nil {
 		cmds = append(cmds, func() tea.Msg { return mcpMsg(summary()) })
 	}
@@ -274,6 +283,9 @@ func (m *dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.fetchPanel()
 		}
 		return m, nil
+	case tracesMsg:
+		m.setTraces(msg)
+		return m, nil
 	case actionMsg:
 		return m, m.handleAction(msg)
 	case doneMsg:
@@ -359,6 +371,11 @@ func (m *dashboard) key(key string) (tea.Model, tea.Cmd) {
 func (m *dashboard) dispatch(key string) (tea.Model, tea.Cmd) {
 	if v, onVolume := m.currentVolume(); onVolume {
 		if cmd, handled := m.volumeKey(v, key); handled {
+			return m, cmd
+		}
+	}
+	if t, onTrace := m.currentTrace(); onTrace {
+		if cmd, handled := m.traceKey(t, key); handled {
 			return m, cmd
 		}
 	}
@@ -611,6 +628,8 @@ func (m *dashboard) compactView() string {
 		b.WriteString("\n" + m.envView())
 	} else if v, ok := m.currentVolume(); ok {
 		b.WriteString("\n" + m.volumePanel(v, max(40, m.width)) + "\n")
+	} else if t, ok := m.currentTrace(); ok {
+		b.WriteString("\n" + m.tracePanel(t, max(40, m.width)) + "\n")
 	} else if m.onAddRepo {
 		b.WriteString("\n" + addRepoHelp + "\n")
 	} else if r, ok := m.current(); ok {
@@ -631,6 +650,9 @@ func (m *dashboard) compactView() string {
 		if m.confirm != "" {
 			help = "y delete · any other key cancels"
 		}
+	}
+	if _, ok := m.currentTrace(); ok {
+		help = "↑↓ move · ←→ list · enter open in Trace Viewer · y copy link · q quit"
 	}
 	b.WriteString("\n" + helpStyle.Render(help) + "\n")
 	if m.width > 0 {
@@ -716,15 +738,36 @@ func (m *dashboard) table() string {
 			}
 		}
 	}
+	if m.showTraces() {
+		head := []string{"TRACE", "RESULT", "REPO", "AGE"}
+		cells := [][]string{head}
+		for _, t := range m.traces {
+			cells = append(cells, m.traceCells(t))
+		}
+		tw := columnWidths(cells)
+		b.WriteString("\n    " + headerStyle.Render(formatRow(head, tw)) + "\n")
+		if len(m.traces) == 0 {
+			b.WriteString("    " + labelStyle.Render(noTraces) + "\n")
+		}
+		for j, c := range cells[1:] {
+			line := formatRow(c, tw)
+			line = strings.Replace(line, c[1], resultStyle(m.traces[j])(c[1]), 1)
+			if len(m.rows)+len(m.volumes)+j == m.cursor {
+				b.WriteString(cursorStyle.Render("> ") + "  " + line + "\n")
+			} else {
+				b.WriteString("    " + line + "\n")
+			}
+		}
+	}
 	return b.String()
 }
 
 // jumpSection moves the cursor to the next list in direction dir (1 down,
 // -1 up, wrapping around) that has rows, where the cursor last was in it.
 func (m *dashboard) jumpSection(dir int) {
-	s := m.focusSection()
-	for range 3 {
-		s = (s + dir + 3) % 3
+	s, n := m.focusSection(), m.sections()
+	for range n {
+		s = (s + dir + n) % n
 		if s == sectionRepos && !m.hasRepos() {
 			// The empty Repos list is a stop, to add a repo from.
 			m.onAddRepo = true
@@ -1049,6 +1092,9 @@ func (m *dashboard) details(r orchestrate.ServiceStatus) string {
 	}
 	if vols := m.volumesFor(r.Name); len(vols) > 0 {
 		add("Volumes", strings.Join(vols, ", ")+labelStyle.Render("  (in the Volumes list)"))
+	}
+	if traces := m.repoTraces(r); traces != "" {
+		add("Traces", traces)
 	}
 	return strings.Join(lines, "\n") + "\n"
 }

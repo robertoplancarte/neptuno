@@ -18,6 +18,8 @@ const (
 	sectionRepos = iota
 	sectionServices
 	sectionVolumes
+	// sectionTraces is there only while a repo uses Playwright.
+	sectionTraces
 )
 
 // volumesMsg carries the project's volumes, once loaded.
@@ -39,8 +41,8 @@ func (m *dashboard) loadVolumes() tea.Cmd {
 }
 
 // total counts the rows the cursor moves over: the repos and services, then
-// the volumes.
-func (m *dashboard) total() int { return len(m.rows) + len(m.volumes) }
+// the volumes, then the traces.
+func (m *dashboard) total() int { return len(m.rows) + len(m.volumes) + len(m.visibleTraces()) }
 
 // currentVolume is the volume under the cursor, if it is on one.
 func (m *dashboard) currentVolume() (orchestrate.Volume, bool) {
@@ -75,6 +77,8 @@ const addRepoLine = "+ Add a repo (enter or n)"
 // section says which left-hand list row i is in.
 func (m *dashboard) section(i int) int {
 	switch {
+	case i >= len(m.rows)+len(m.volumes):
+		return sectionTraces
 	case i >= len(m.rows):
 		return sectionVolumes
 	case m.rows[i].Repo:

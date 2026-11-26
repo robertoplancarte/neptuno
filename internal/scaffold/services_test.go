@@ -93,15 +93,18 @@ func TestPlaywrightIsOptIn(t *testing.T) {
 	for _, want := range []string{
 		"image: mcr.microsoft.com/playwright:v" + PlaywrightVersion + "-noble",
 		"@playwright/mcp@" + PlaywrightMCPVersion,
-		"playwright@" + PlaywrightVersion + " run-server --host 0.0.0.0 --port 3000",
+		"-p playwright@" + PlaywrightVersion + " -c 'command -v playwright'",
+		`"$$pw" run-server --host 0.0.0.0 --port 3000 &`,
 		`net.connect(80, "proxy")`,
+		`}).listen(9323, "0.0.0.0");' "$$(dirname "$$pw")/../playwright-core/lib/vite/traceViewer" &`,
+		`volumes: ["playwright:/root/.npm", "./repos:/repos:ro"]`,
 		"\n  playwright:\n",
 	} {
 		if !strings.Contains(compose, want) {
 			t.Errorf("compose.yml lacks %q:\n%s", want, compose)
 		}
 	}
-	if got := read(t, filepath.Join(dir, "Caddyfile")); !strings.Contains(got, "http://playwright.localhost {\n\treverse_proxy playwright:8931\n}") {
+	if got := read(t, filepath.Join(dir, "Caddyfile")); !strings.Contains(got, PlaywrightSite) || !strings.Contains(got, "reverse_proxy playwright:9323") {
 		t.Errorf("Caddyfile:\n%s", got)
 	}
 	if got := read(t, filepath.Join(dir, "environments/_shared/base.env")); !strings.Contains(got, "PLAYWRIGHT_SERVER_URL=ws://playwright:3000/") {

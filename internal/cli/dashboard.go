@@ -93,6 +93,7 @@ func dashboardHere(o *orchestrate.Orchestrator) error {
 		InspectVolume: func(v orchestrate.Volume) (orchestrate.VolumeDetail, error) { return live.get().InspectVolume(v) },
 		Stacks:        func() ([]*stacks.Stack, error) { return stacks.List(o.Project.Path("stacks")) },
 		HostWarnings:  func() []string { return live.get().HostWarnings() },
+		Traces:        func() ([]orchestrate.Trace, error) { return live.get().Traces() },
 	})
 }
 
