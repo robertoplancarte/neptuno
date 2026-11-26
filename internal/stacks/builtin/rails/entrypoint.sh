@@ -25,18 +25,24 @@ prepare_database() {
   *) bin/rails db:prepare ;;
   esac
 }
-# `neptuno add` leaves tmp/neptuno-new-app in an app it generates. A database
+# `neptuno add` leaves tmp/neptuno-new-app in an app it generates. Databases
 # an earlier app of the same name left behind would make db:prepare fail on
-# tables that already exist, so the new app's first start renames it.
+# tables that already exist, so the new app's first start renames them. The
+# server comes from PGHOST and the other PG* variables in _shared/base.env.
 set_aside_old_database() {
   [ -f tmp/neptuno-new-app ] || return 0
-  bundle exec ruby -rpg -ruri -e '
-    url = URI(ENV.fetch("DATABASE_URL"))
-    name = url.path.delete_prefix("/")
-    url.path = "/postgres"
-    pg = PG.connect(url.to_s)
-    if pg.exec_params("SELECT 1 FROM pg_database WHERE datname = $1", [name]).ntuples > 0
-      old = "#{name}_old_#{Time.now.strftime("%Y%m%d%H%M%S")}"
+  bundle exec ruby -rpg -rerb -ryaml -e '
+    # The development and test database names, from config/database.yml.
+    config = YAML.safe_load(ERB.new(File.read("config/database.yml")).result, aliases: true)
+    names = %w[development test].flat_map do |env|
+      c = config[env] || {}
+      c.key?("database") ? [c["database"]] : c.values.grep(Hash).map { |db| db["database"] }
+    end.compact.uniq
+    pg = PG.connect(dbname: "postgres")
+    stamp = Time.now.strftime("%Y%m%d%H%M%S")
+    names.each do |name|
+      next if pg.exec_params("SELECT 1 FROM pg_database WHERE datname = $1", [name]).ntuples.zero?
+      old = "#{name}_old_#{stamp}"
       pg.exec("ALTER DATABASE #{pg.quote_ident(name)} RENAME TO #{pg.quote_ident(old)}")
       puts "entrypoint.sh: #{name} is from an earlier {{.Name}} app; renamed it to #{old}"
     end

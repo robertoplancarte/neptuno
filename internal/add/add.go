@@ -141,6 +141,9 @@ func (a *Adder) Add(opts Options) error {
 	if err := a.addOptInServices(services); err != nil {
 		return err
 	}
+	if err := a.backfillSharedEnv(services); err != nil {
+		return err
+	}
 	if err := a.addComposeService(name, services, volumes); err != nil {
 		return err
 	}
@@ -285,6 +288,26 @@ func (a *Adder) addOptInServices(services []string) error {
 	a.Project = p
 	a.reloadCaddy()
 	return nil
+}
+
+// backfillSharedEnv gives environments/_shared/base.env the variables of the
+// project's services the repo uses that it lacks, such as postgres's PGHOST,
+// which projects made by an older Neptuno don't have and stacks rely on.
+func (a *Adder) backfillSharedEnv(services []string) error {
+	if _, err := os.Stat(a.Project.Path("compose.yml")); err != nil {
+		return nil // not a project with shared services
+	}
+	var have []string
+	for _, s := range services {
+		if _, ok := a.Project.Services[s]; ok {
+			have = append(have, s)
+		}
+	}
+	log, err := scaffold.BackfillEnv(a.Project.Root, have)
+	for _, l := range log {
+		fmt.Fprintf(a.Log, "  %s\n", l)
+	}
+	return err
 }
 
 func (a *Adder) addCaddySite(name string, port int, wildcard bool) error {
