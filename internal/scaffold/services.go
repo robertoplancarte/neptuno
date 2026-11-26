@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -68,6 +69,70 @@ const (
 	PlaywrightMinor      = "1.65.0"
 	PlaywrightMCPVersion = "0.0.86"
 )
+
+// PlaywrightSite is the playwright service's Caddyfile site: Playwright MCP,
+// and the Trace Viewer under /trace/ with the traces it opens under /traces/.
+const PlaywrightSite = `http://playwright.localhost {
+	@traces path /trace /trace/* /traces/*
+	handle @traces {
+		reverse_proxy playwright:9323
+	}
+	handle {
+		reverse_proxy playwright:8931
+	}
+}`
+
+// PlaywrightURL is the playwright service's site, unless the proxy is
+// published on a port other than 80.
+const PlaywrightURL = "http://playwright.localhost"
+
+// TraceViewerURL is where this machine opens one of a repo's Playwright
+// traces, a file in repos/<repo>/tmp/playwright-traces: the playwright
+// service's Trace Viewer at site, such as PlaywrightURL, which loads the
+// trace from the same server.
+func TraceViewerURL(site, repo, file string) string {
+	site = strings.TrimRight(site, "/")
+	trace := site + "/traces/" + url.PathEscape(repo) + "/" + url.PathEscape(file)
+	return site + "/trace/index.html?trace=" + url.QueryEscape(trace)
+}
+
+// traceServer is the playwright service's web server on port 9323, run with
+// the Trace Viewer's folder as its argument. It serves that folder under
+// /trace/, the same Trace Viewer `playwright show-trace` serves, and each
+// repo's traces at /traces/<repo>/<file>.zip from the read-only /repos
+// mount. It is single-quoted shell, so it has no single quotes, and its $
+// are doubled for compose.
+const traceServer = `node -e '
+        const http = require("http"), fs = require("fs"), path = require("path");
+        const viewer = path.resolve(process.argv[1]);
+        const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css",
+          ".svg": "image/svg+xml", ".png": "image/png", ".ttf": "font/ttf", ".woff2": "font/woff2",
+          ".json": "application/json", ".webmanifest": "application/manifest+json", ".zip": "application/zip" };
+        const name = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$$/;
+        http.createServer((req, res) => {
+          const url = new URL(req.url, "http://localhost");
+          let parts, file;
+          try { parts = url.pathname.split("/").slice(1).map(decodeURIComponent); } catch { parts = []; }
+          if (parts[0] === "trace" && parts.length > 1) {
+            file = path.join(viewer, ...parts.slice(1));
+            if (!file.startsWith(viewer + path.sep)) file = "";
+          } else if (parts[0] === "traces" && parts.length === 3 && name.test(parts[1]) && name.test(parts[2]) && parts[2].endsWith(".zip")) {
+            file = path.join("/repos", parts[1], "tmp", "playwright-traces", parts[2]);
+          } else if (url.pathname === "/trace") {
+            res.writeHead(302, { location: "/trace/index.html" });
+            return res.end();
+          }
+          fs.stat(file || "", (err, st) => {
+            if (err || !st.isFile()) {
+              res.writeHead(404, { "content-type": "text/plain" });
+              return res.end("not found\n");
+            }
+            res.writeHead(200, { "content-type": types[path.extname(file)] || "application/octet-stream",
+              "content-length": st.size, "cache-control": "no-cache" });
+            if (req.method === "HEAD") return res.end();
+            fs.createReadStream(file).pipe(res);
+          });
+        }).listen(9323, "0.0.0.0");'`
 
 // DefaultServices are the shared services the init menu offers, in order.
 var DefaultServices = []Service{
@@ -278,14 +343,19 @@ playwright:
         }' &
       chrome=$$(ls -d /ms-playwright/chromium-*/chrome-linux*/chrome | head -n 1)
       npx -y @playwright/mcp@` + PlaywrightMCPVersion + ` --headless --no-sandbox --isolated --executable-path "$$chrome" --host 0.0.0.0 --port 8931 --allowed-hosts '*' &
-      npx -y playwright@` + PlaywrightVersion + ` run-server --host 0.0.0.0 --port 3000 &
+      # One install of Playwright runs the browser server and the Trace Viewer.
+      pw=$$(npx -y -p playwright@` + PlaywrightVersion + ` -c 'command -v playwright') || exit 1
+      "$$pw" run-server --host 0.0.0.0 --port 3000 &
+      ` + traceServer + ` "$$(dirname "$$pw")/../playwright-core/lib/vite/traceViewer" &
       # Stop, so the container shows as exited, when any of them does.
       wait -n
-  volumes: ["playwright:/root/.npm"]
+  # The repos' system tests save Playwright traces in
+  # repos/<repo>/tmp/playwright-traces, which the Trace Viewer reads here.
+  volumes: ["playwright:/root/.npm", "./repos:/repos:ro"]
   depends_on: [proxy]
 `,
 		Volumes: []string{"playwright"},
-		Site:    "http://playwright.localhost {\n\treverse_proxy playwright:8931\n}",
+		Site:    PlaywrightSite,
 		Env: `# Playwright's browser server; a test client must match its version.
 PLAYWRIGHT_SERVER_URL=ws://playwright:3000/
 `,

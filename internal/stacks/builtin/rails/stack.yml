@@ -79,6 +79,63 @@ options:
 
       class ApplicationSystemTestCase < ActionDispatch::SystemTestCase
         driven_by :playwright_server
+
+        # Playwright traces record each test's browser actions, with
+        # screenshots, the DOM and network calls, to step through in
+        # Playwright's Trace Viewer: the Neptuno dashboard's Traces list opens
+        # them. Each test's goes to tmp/playwright-traces/<test>.zip, next to a
+        # .json that says how the test went. PLAYWRIGHT_TRACE picks which:
+        #   failed (default)  keep the traces of tests that fail
+        #   all               keep every test's trace
+        #   off               record none
+        TRACES_DIR = Rails.root.join("tmp/playwright-traces")
+
+        setup do
+          @playwright_trace = nil
+          if playwright_trace_mode != "off" && page.driver.respond_to?(:start_tracing)
+            page.driver.start_tracing(title: "#{self.class.name}##{name}", screenshots: true, snapshots: true, sources: true)
+            @playwright_trace = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          end
+        end
+
+        # Teardown blocks run after Capybara has closed the browser, so the
+        # trace is saved before then.
+        def before_teardown
+          save_playwright_trace if @playwright_trace
+        ensure
+          super
+        end
+
+        private
+          def playwright_trace_mode
+            ENV.fetch("PLAYWRIGHT_TRACE", "failed").downcase
+          end
+
+          def save_playwright_trace
+            result = if skipped? then "skipped" elsif passed? then "passed" elsif error? then "error" else "failed" end
+            base = TRACES_DIR.join("#{self.class.name}##{name}".gsub(/[^A-Za-z0-9_.-]+/, "_")[0, 200])
+            zip, json = Pathname("#{base}.zip"), Pathname("#{base}.json")
+            unless playwright_trace_mode == "all" || %w[failed error].include?(result)
+              # Discard it, and an earlier failure's trace of this test.
+              page.driver.stop_tracing
+              FileUtils.rm_f([zip, json])
+              return
+            end
+            FileUtils.mkdir_p(TRACES_DIR)
+            page.driver.stop_tracing(path: zip.to_s)
+            file, line = method(name).source_location
+            File.write(json, JSON.pretty_generate(
+              test: "#{self.class.name}##{name}",
+              result: result,
+              location: "#{Pathname(file).relative_path_from(Rails.root)}:#{line}",
+              finished_at: Time.now.utc.iso8601,
+              duration: (Process.clock_gettime(Process::CLOCK_MONOTONIC) - @playwright_trace).round(2),
+              trace: zip.basename.to_s,
+              failure: failure&.message.to_s.lines.first(5).join.strip.presence
+            ))
+          rescue => e
+            warn "Could not save the Playwright trace of #{name}: #{e.class}: #{e.message}"
+          end
       end
       RUBY
       test -s test/application_system_test_case.rb

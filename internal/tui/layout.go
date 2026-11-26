@@ -159,26 +159,35 @@ func (m *dashboard) layoutView() string {
 	rest := bodyH - projectH
 	focus := m.focusSection()
 	counts := []int{len(repos), len(svcs), len(m.volumes)}
+	if m.showTraces() {
+		counts = append(counts, len(m.traces))
+	}
 	// The focused list takes the room the others don't need.
-	heights := make([]int, 3)
+	heights := make([]int, len(counts))
 	used := 0
 	for s, n := range counts {
 		if s != focus {
-			heights[s] = min(max(n+2, 3), max(3, rest/4))
+			heights[s] = min(max(n+2, 3), max(3, rest/(len(counts)+1)))
 			used += heights[s]
 		}
 	}
 	heights[focus] = rest - used
 
-	left := lipgloss.JoinVertical(lipgloss.Left,
+	boxes := []string{
 		box("Project", projectLines, leftW, projectH, false),
 		box(fmt.Sprintf("Repos %d", len(repos)), m.repoLines(repos, heights[0]-2, leftW-2), leftW, heights[0], focus == sectionRepos),
 		box(fmt.Sprintf("Services %d", len(svcs)), m.listLines(svcs, heights[1]-2, leftW-2), leftW, heights[1], focus == sectionServices),
 		box(fmt.Sprintf("Volumes %d", len(m.volumes)), m.volumeLines(heights[2]-2, leftW-2), leftW, heights[2], focus == sectionVolumes),
-	)
+	}
+	if len(counts) > sectionTraces {
+		boxes = append(boxes, box(fmt.Sprintf("Traces %d", len(m.traces)), m.traceLines(heights[sectionTraces]-2, leftW-2), leftW, heights[sectionTraces], focus == sectionTraces))
+	}
+	left := lipgloss.JoinVertical(lipgloss.Left, boxes...)
 	title := m.tabTitle()
 	if v, ok := m.currentVolume(); ok {
 		title = m.volumeTitle(v)
+	} else if _, ok := m.currentTrace(); ok {
+		title = m.traceTitle()
 	}
 	right := box(title, m.rightLines(bodyH-2, rightW-2), rightW, bodyH, false)
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, right) + "\n" + m.keyBar(width)
@@ -342,6 +351,7 @@ func (m *dashboard) rightLines(height, width int) []string {
 	var text string
 	r, ok := m.current()
 	v, onVolume := m.currentVolume()
+	tr, onTrace := m.currentTrace()
 	switch {
 	case m.form != nil:
 		text = m.formView()
@@ -353,6 +363,8 @@ func (m *dashboard) rightLines(height, width int) []string {
 		text = m.actionsView()
 	case onVolume:
 		text = m.volumePanel(v, width)
+	case onTrace:
+		text = m.tracePanel(tr, width)
 	case m.onAddRepo:
 		text = addRepoHelp
 	case !ok:
@@ -412,6 +424,12 @@ func (m *dashboard) keyBar(width int) string {
 		}
 		if m.confirm != "" {
 			keys = [][2]string{{"y", "delete it"}, {"any other key", "cancels"}}
+		}
+	}
+	if _, ok := m.currentTrace(); ok && m.envs == nil && m.menu == nil {
+		keys = [][2]string{{"enter", "open in Trace Viewer"}, {"y", "copy link"}, {"↑↓", "move"}, {"← →", "list"}, {"[ ]", "tab"}, {"f", "refresh"}, {"q", "quit"}}
+		if m.tab == tabActions {
+			keys[0] = [2]string{"enter", "choose action"}
 		}
 	}
 	if m.actionsFocus {

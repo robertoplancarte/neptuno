@@ -67,7 +67,7 @@ acme/
 | Object storage | `chrislusf/seaweedfs` | `localhost:8333`, `s3.localhost` |
 | Mail catcher | `axllent/mailpit:v1` | SMTP `localhost:1025`, inbox `localhost:8025`, `mailpit.localhost` |
 | Webhooks | `hook0/hook0-api`, `hook0/hook0-output-worker`, `hook0/hook0-frontend` | API `localhost:8081`, dashboard `hook0.localhost` |
-| Browsers (opt-in) | `mcr.microsoft.com/playwright` | tests `ws://playwright:3000/`, MCP `playwright.localhost/mcp` |
+| Browsers (opt-in) | `mcr.microsoft.com/playwright` | tests `ws://playwright:3000/`, MCP `playwright.localhost/mcp`, Trace Viewer `playwright.localhost/trace/` |
 
 [Hook0](https://www.hook0.com) keeps its tables in their own schemas of the
 shared `postgres` database, which is why that service is PostgreSQL 18: Hook0
@@ -155,7 +155,7 @@ them with `--with` and `--without`). The `rails` stack has:
 | `mailpit` | on | Action Mailer in development delivers over SMTP to the project's Mailpit (`SMTP_HOST`, `SMTP_PORT`), so mail shows at `http://mailpit.localhost`; mail links point at `http://<name>.localhost` |
 | `action_text` | off | runs `bin/rails action_text:install` |
 | `storage_s3` | off | stores Active Storage uploads in the project's SeaweedFS: adds `aws-sdk-s3`, a `seaweedfs` service in `config/storage.yml`, the S3 env vars, and creates the bucket at container start |
-| `playwright` | off | system tests drive the project's shared Playwright browsers: adds `capybara-playwright-driver` and a `test/application_system_test_case.rb` that connects to them, and adds the `playwright` service if the project lacks it (see [Browser testing with Playwright](#browser-testing-with-playwright)) |
+| `playwright` | off | system tests drive the project's shared Playwright browsers: adds `capybara-playwright-driver` and a `test/application_system_test_case.rb` that connects to them and keeps a Playwright trace of each failed test, and adds the `playwright` service if the project lacks it (see [Browser testing with Playwright](#browser-testing-with-playwright)) |
 
 ```sh
 neptuno add shop --stack rails --with action_text,storage_s3 --without tailwind
@@ -222,6 +222,11 @@ option adds it to `compose.yml`, the `Caddyfile` and
   drives to click through a repo and check its own work. `neptuno up` and
   `neptuno mcp sync` add it to `.mcp.json` as `playwright` whenever
   `compose.yml` has the service, without anything in `neptuno.yml`.
+- Playwright's [Trace Viewer](https://playwright.dev/docs/trace-viewer) at
+  `http://playwright.localhost/trace/`, the same one
+  `playwright show-trace` serves, which opens the traces repos' system tests
+  save (see [Traces](#traces)). The container mounts `repos/` read-only to
+  serve them.
 
 Inside the container every `*.localhost` name reaches the proxy: browsers
 send those names to the container's own loopback, and a small forwarder
@@ -240,6 +245,40 @@ failures land in `repos/<repo>/tmp/screenshots` as usual. For a Rails repo
 you already have, run `neptuno init --services playwright`, add the two
 gems to its test group, and copy that file from a new app made with the
 option.
+
+#### Traces
+
+That file also records a Playwright trace of each system test: every
+browser action with a screenshot, the DOM before and after, console output
+and network calls, to step through in the Trace Viewer. `PLAYWRIGHT_TRACE`
+picks which traces are kept:
+
+| `PLAYWRIGHT_TRACE` | Keeps |
+| --- | --- |
+| `failed` (default) | the traces of tests that fail or error; a test that passes drops its earlier one |
+| `all` | every test's trace |
+| `off` | none, and nothing is recorded |
+
+Choose which tests run the usual Rails way, and each one that runs saves its
+own trace:
+
+```sh
+neptuno exec shop -- bin/rails test test/system/checkout_test.rb:42
+neptuno exec shop -- env PLAYWRIGHT_TRACE=all bin/rails test:system
+```
+
+Each test's trace goes to `repos/<repo>/tmp/playwright-traces/<test>.zip`,
+replacing that test's last one, with a `.json` beside it that says how the
+test went, where it is and the start of its failure. Only browser-driven
+tests save traces: unit and integration tests drive no browser, so they have
+none. The dashboard's [Traces list](#traces-list) opens them; without it, open
+`http://playwright.localhost/trace/` and drop a `.zip` on it, or run
+`npx playwright show-trace <file>`.
+
+Projects that got the `playwright` service before the Trace Viewer did
+have the old service in `compose.yml` and the `Caddyfile`. To update it,
+delete the `playwright` service from `compose.yml` and its site from the
+`Caddyfile`, then run `neptuno init --services playwright`.
 
 ## Starting services
 
@@ -374,7 +413,7 @@ to a plain list.
 | Key | Does |
 | --- | --- |
 | `↑` `↓` / `j` `k` | move |
-| `←` `→` / `h` `l` / `tab` | jump between the repos, services and volumes lists |
+| `←` `→` / `h` `l` / `tab` | jump between the repos, services, volumes and traces lists |
 | `[` `]` | switch the right panel's tab |
 | `PgUp` `PgDn` / `ctrl+u` `ctrl+d` | scroll the right panel |
 | `space` | select rows; `a` selects all |
@@ -448,6 +487,22 @@ panel. External volumes are left alone.
 From the shell, `neptuno volumes` prints the list and
 `neptuno volumes reset <volume>...` does the same clear, asking first unless
 you pass `--yes`.
+
+### Traces list
+
+When a repo uses Playwright (its container `depends_on` the `playwright`
+service, or a `run: host` repo lists it under `depends_on` in
+`neptuno.yml`), a **Traces** list appears under the volumes. It has the
+Playwright traces those repos' system tests saved (see [Traces](#traces)),
+newest first: each test's name, whether it failed or passed, its repo and
+how long ago it ran. A repo's Info tab counts its traces. Projects with no
+Playwright repo don't get the list.
+
+With the cursor on a trace, the right panel shows the test, its failure, the
+file it is in, the command that runs it again, and the link that opens it.
+`enter` opens it in Playwright's Trace Viewer in your browser, served by the
+`playwright` service at `http://playwright.localhost/trace/`, which must be
+running; `y` copies the link.
 
 `neptuno up` makes the dashboard the first window of the session too, so
 attaching lands on it. Quitting it closes that window, and the next `neptuno`
