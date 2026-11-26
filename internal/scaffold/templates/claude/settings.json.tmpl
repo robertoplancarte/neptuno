@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit(/repos/**)",
+      "Bash(neptuno exec *)",
+      "Bash(neptuno status)",
+      "Bash(neptuno mcp)",
+      "Bash(neptuno env show *)",
+      "Bash(neptuno up -d *)",
+      "Bash(neptuno restart *)",
+      "Bash(docker compose ps *)",
+      "Bash(docker compose logs *)",
+      "Bash(git -C repos/*)"
+    ],
+    "deny": [
+      "Edit(/.neptuno/**)"
+    ]
+  }
+}

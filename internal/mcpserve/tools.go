@@ -10,13 +10,8 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/robertoplancarte/neptuno/internal/mcp"
 	"github.com/robertoplancarte/neptuno/internal/project"
 )
-
-// ContainerMCPConfig is the MCP config for Claude inside the containers, as
-// orchestrate.ContainerMCPConfig.
-const ContainerMCPConfig = "/root/.claude/" + mcp.ContainerFile
 
 type (
 	noInput      struct{}
@@ -35,7 +30,7 @@ type (
 		Lines   int    `json:"lines,omitempty" jsonschema:"how many of the last lines to return; 100 when left out"`
 	}
 	askArgs struct {
-		Repo string `json:"repo" jsonschema:"the repo whose Claude does the task"`
+		Repo string `json:"repo" jsonschema:"the repo whose subagent does the task"`
 		Task string `json:"task" jsonschema:"what to do, written as a prompt for Claude Code"`
 	}
 )
@@ -86,14 +81,14 @@ func (s *Server) addOwnTools() {
 
 	sdk.AddTool(s.Server, &sdk.Tool{
 		Name: "neptuno_exec",
-		Description: "Runs a shell command where the repo runs, next to its code, tools and services: in its container with " +
-			"`docker compose exec`, or in repos/<repo> for a repo that runs on the host. Returns the output and exit status. " +
+		Description: "Runs a shell command where the repo runs, next to its code, tools and services, with `neptuno exec`: in its " +
+			"container, started first if needed, or in repos/<repo> for a repo that runs on the host. Returns the output and exit status. " +
 			"Use it for tests, generators, database consoles and anything else the repo's own tooling does.",
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in execArgs) (*sdk.CallToolResult, any, error) {
 		if !p.IsRepo(in.Repo) {
 			return errorResult(fmt.Sprintf("%q is %v", in.Repo, errNotRepo)), nil, nil
 		}
-		out, err := s.inRepo(ctx, in.Repo, "sh", "-c", in.Command)
+		out, err := s.neptuno(ctx, "exec", in.Repo, "--", in.Command)
 		return textResult(out, err), nil, nil
 	})
 
@@ -114,18 +109,15 @@ func (s *Server) addOwnTools() {
 
 	sdk.AddTool(s.Server, &sdk.Tool{
 		Name: "neptuno_ask_repo_claude",
-		Description: "Hands a task to Claude Code running where the repo runs (its container, or repos/<repo> on the host), " +
-			"with the repo's code, tools and the project's MCP servers at hand, and returns its answer. Use it for work that " +
-			"needs many steps inside one repo. It can take minutes.",
+		Description: "Hands a task to Claude Code on this machine, in the project folder, which gives it to the repo's subagent: " +
+			"it edits the code in repos/<repo>, runs the repo's tools in its container with `neptuno exec`, has the project's MCP " +
+			"servers, and returns its answer. Use it for work that needs many steps inside one repo. It can take minutes.",
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in askArgs) (*sdk.CallToolResult, any, error) {
 		if !p.IsRepo(in.Repo) {
 			return errorResult(fmt.Sprintf("%q is %v", in.Repo, errNotRepo)), nil, nil
 		}
-		args := []string{"claude", "-p", in.Task}
-		if p.RunMode(in.Repo) != project.RunHost {
-			args = append(args, "--mcp-config", ContainerMCPConfig)
-		}
-		out, err := s.inRepo(ctx, in.Repo, args...)
+		prompt := fmt.Sprintf("Use the %s subagent for this task, then report what it did and found.\n\n%s", in.Repo, in.Task)
+		out, err := s.opts.Run(ctx, p.Root, "claude", "-p", prompt)
 		return textResult(out, err), nil, nil
 	})
 
@@ -144,15 +136,6 @@ func boolPtr(b bool) *bool { return &b }
 // neptuno runs the neptuno binary in the project root.
 func (s *Server) neptuno(ctx context.Context, args ...string) (string, error) {
 	return s.opts.Run(ctx, s.opts.Project.Root, s.opts.Neptuno, args...)
-}
-
-// inRepo runs a command where the repo runs.
-func (s *Server) inRepo(ctx context.Context, repo string, args ...string) (string, error) {
-	p := s.opts.Project
-	if p.RunMode(repo) == project.RunHost {
-		return s.opts.Run(ctx, p.Path("repos", repo), args[0], args[1:]...)
-	}
-	return s.opts.Run(ctx, p.Root, "docker", append([]string{"compose", "exec", "-T", repo}, args...)...)
 }
 
 func describe(list []UpstreamStatus) string {

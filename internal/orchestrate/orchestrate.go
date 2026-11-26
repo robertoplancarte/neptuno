@@ -350,6 +350,12 @@ const DashboardCommand = "dashboard"
 // below it. A dashboard closed with q comes back before the first window,
 // next to the others.
 func (o *Orchestrator) ensureDashboard() error {
+	return o.ensureDashboardWith(nil)
+}
+
+// ensureDashboardWith is ensureDashboard, passing claudeArgs to the Claude
+// Code pane when it opens the window.
+func (o *Orchestrator) ensureDashboardWith(claudeArgs []string) error {
 	p := o.Project
 	command := procfile.Quote(o.Neptuno) + " " + DashboardCommand
 	if o.hasWindow(DashboardWindow) {
@@ -364,7 +370,7 @@ func (o *Orchestrator) ensureDashboard() error {
 	if err != nil {
 		return err
 	}
-	return o.splitClaude()
+	return o.splitClaude(claudeArgs)
 }
 
 // DashboardClaudePane is the share of the dashboard window, in percent,
@@ -373,18 +379,17 @@ const DashboardClaudePane = 50
 
 // splitClaude splits the dashboard window top and bottom and runs Claude
 // Code on the host in the bottom pane, in the project root, so it reads the
-// project's .mcp.json, AGENTS.md and CLAUDE.md. The dashboard keeps focus.
-// Without claude on PATH the dashboard gets the whole window.
-func (o *Orchestrator) splitClaude() error {
+// project's .mcp.json, AGENTS.md, CLAUDE.md, .claude/settings.json and the
+// repos' subagents in .claude/agents. The dashboard keeps focus. Without
+// claude on PATH the dashboard gets the whole window.
+func (o *Orchestrator) splitClaude(args []string) error {
 	if o.Runner.LookPath("claude") != nil {
 		fmt.Fprintln(o.Log, "claude not found on PATH, so the dashboard window has no Claude Code pane.")
 		return nil
 	}
-	// Keep the pane open on failure so the error can be read.
-	command := `claude; status=$?; if [ $status -ne 0 ]; then echo; echo "claude exited with status $status. Press enter to close this pane."; read _; fi`
 	return o.Runner.Run(o.Project.Root, "tmux", "split-window", "-v", "-d",
 		"-l", fmt.Sprintf("%d%%", DashboardClaudePane),
-		"-t", o.target(DashboardWindow), "-c", o.Project.Root, command)
+		"-t", o.target(DashboardWindow), "-c", o.Project.Root, claudeCommand(args))
 }
 
 // runFile holds the ID of the repo's current overmind run, relative to the
@@ -506,8 +511,8 @@ func outerTmuxSocket() string {
 
 // UseOuterTmux points tmux commands at the outer session's server when
 // neptuno runs inside overmind's tmux session. Without it, `neptuno claude`
-// run there would open its window in overmind's server and switch the
-// nested client away from the process windows.
+// run there would look for the dashboard in overmind's server and switch
+// the nested client away from the process windows.
 func UseOuterTmux() {
 	outer := os.Getenv(OuterTmuxEnv)
 	sock, _, _ := strings.Cut(os.Getenv("TMUX"), ",")
@@ -520,7 +525,9 @@ func UseOuterTmux() {
 // shell from the process it replaced.
 const deadPaneMark = ": neptuno-shell; "
 
-// claudeMark starts the command of Claude's tab in overmind's session.
+// claudeMark starts the command of the Claude Code pane below the
+// dashboard, so Claude can find it again. Older neptunos started Claude's
+// tab in overmind's session with it too.
 const claudeMark = ": neptuno-claude; "
 
 // ClosesOnExit reports whether the pane-died hook closes a pane with this

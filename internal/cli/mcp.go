@@ -31,9 +31,9 @@ func newMCPCommand() *cobra.Command {
 			"    locke:\n" +
 			"      mcp:\n" +
 			"        hyperdrive: /_hyperdrive/mcp\n\n" +
-			"`neptuno up` writes them to the project's .mcp.json, for Claude started in\n" +
-			"the project folder, and `neptuno claude` hands them to Claude in a repo's\n" +
-			"container. `neptuno mcp sync` writes them without starting anything.",
+			"`neptuno up` writes them to the project's .mcp.json, for Claude Code, which\n" +
+			"runs on this machine in the project folder. `neptuno mcp sync` writes them\n" +
+			"without starting anything.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			o, err := loadOrchestrator(cmd)
@@ -52,13 +52,12 @@ func newMCPCommand() *cobra.Command {
 		Use:   "sync",
 		Short: "Write the MCP servers to Claude's config files",
 		Long: "Writes the MCP servers the repos declare in neptuno.yml to the project's\n" +
-			".mcp.json, with their http://<repo>.localhost URLs, and to\n" +
-			".neptuno/claude/" + mcp.ContainerFile + ", with the URLs that work inside the\n" +
-			"containers. Servers you added to .mcp.json yourself are kept. `neptuno up`\n" +
-			"does the same each time it runs.\n\n" +
-			"Also writes the project's AGENTS.md, CLAUDE.md and .claude/skills, which\n" +
-			"tell coding agents how to work in the project, where any is missing. Files\n" +
-			"you have already are left alone.",
+			".mcp.json, with their http://<repo>.localhost URLs. Servers you added to\n" +
+			".mcp.json yourself are kept. `neptuno up` does the same each time it runs.\n\n" +
+			"Also writes the project's AGENTS.md, CLAUDE.md, .claude/settings.json,\n" +
+			".claude/skills and a subagent per repo in .claude/agents, which tell coding\n" +
+			"agents how to work in the project, where any is missing. Files you have\n" +
+			"already are left alone.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			o, err := loadOrchestrator(cmd)
@@ -118,8 +117,8 @@ func newMCPServeCommand() *cobra.Command {
 		Short: "Run the project's MCP server over stdio, for Claude desktop",
 		Long: "Runs one local MCP server over stdin and stdout, as Claude desktop and other\n" +
 			"MCP clients start them. It has Neptuno's tools for the project (status, up,\n" +
-			"down, restart, logs, running a command in a repo, and handing a task to the\n" +
-			"Claude in a repo's container), and forwards the tools of every MCP server\n" +
+			"down, restart, logs, running a command in a repo, and handing a task to a\n" +
+			"repo's subagent), and forwards the tools of every MCP server\n" +
 			"the repos declare, named <repo>-<server>__<tool>. A server whose repo isn't\n" +
 			"running is tried again every 15 seconds and on each call.\n\n" +
 			"`neptuno mcp desktop` adds it to Claude desktop's config.",

@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"errors"
+	"fmt"
 
 	"github.com/robertoplancarte/neptuno/internal/orchestrate"
 	"github.com/spf13/cobra"
@@ -10,38 +10,35 @@ import (
 func newClaudeCommand() *cobra.Command {
 	var detach bool
 	cmd := &cobra.Command{
-		Use:   "claude [repo] [-- claude-args...]",
-		Short: "Run Claude Code inside a repo's container",
-		Long: "Opens Claude Code inside the repo's running container, in a claude tab of\n" +
-			"the repo's window, next to its processes, starting the repo if needed.\n" +
-			"Claude sees the repo's code, tools and services exactly as the app does.\n\n" +
-			"The repo defaults to the one whose folder you are in. Sign-in and settings\n" +
-			"live in .neptuno/claude, mounted into every repo's container, so you sign in\n" +
-			"once per project. Quitting Claude leaves the repo's processes running.",
-		Example: "  neptuno claude api\n" +
-			"  neptuno claude api -- --continue\n" +
-			"  cd repos/api && neptuno claude",
+		Use:   "claude [-- claude-args...]",
+		Short: "Open the project's Claude Code, below the dashboard",
+		Long: "Shows Claude Code in the pane below the dashboard, in the first window of the\n" +
+			"project's tmux session, opening the window and the pane if either is\n" +
+			"missing. Claude runs on this machine in the project folder: it edits the\n" +
+			"code in repos/ directly, runs each repo's tools in its container with\n" +
+			"`neptuno exec <repo> -- <command>`, and has a subagent per repo in\n" +
+			".claude/agents for work inside one repo. .mcp.json gives it the repos' MCP\n" +
+			"servers, and .claude/settings.json lets it edit repos/ and run neptuno exec\n" +
+			"without asking.\n\n" +
+			"Arguments after -- go to claude when the pane starts.",
+		Example: "  neptuno claude\n" +
+			"  neptuno claude -- --continue",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var claudeArgs []string
 			if dash := cmd.ArgsLenAtDash(); dash >= 0 {
 				args, claudeArgs = args[:dash], args[dash:]
 			}
-			if len(args) > 1 {
-				return errors.New("name one repo; pass arguments for claude after --")
+			if len(args) > 0 {
+				return fmt.Errorf("Claude Code now runs on this machine for the whole project, not in a repo's container. "+
+					"Run `neptuno claude` and ask it to work on %s: it hands the task to %s's subagent, which runs commands with `neptuno exec %s`", args[0], args[0], args[0])
 			}
 			o, err := loadOrchestrator(cmd)
 			if err != nil {
 				return err
 			}
-			var repo string
-			if len(args) == 1 {
-				repo = args[0]
-			} else if repo = serviceFromFolder(cmd, o.Project); repo == "" {
-				return errors.New("name a repo, or run this inside one of its folders")
-			}
-			return o.Claude(orchestrate.ClaudeOptions{Repo: repo, Args: claudeArgs, Detach: detach})
+			return o.Claude(orchestrate.ClaudeOptions{Args: claudeArgs, Detach: detach})
 		},
 	}
-	cmd.Flags().BoolVarP(&detach, "detach", "d", false, "open the tab without attaching to it")
+	cmd.Flags().BoolVarP(&detach, "detach", "d", false, "select the pane without attaching to the session")
 	return cmd
 }

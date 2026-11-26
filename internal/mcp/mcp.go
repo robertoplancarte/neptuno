@@ -1,7 +1,6 @@
 // Package mcp works out where the MCP servers that a project's repos declare
-// in neptuno.yml answer, and writes them into Claude Code's config files: the
-// project's .mcp.json for Claude on the host, and a config for Claude inside
-// the repos' containers.
+// in neptuno.yml answer, and writes them into the project's .mcp.json for
+// Claude Code, which runs on the host in the project folder.
 package mcp
 
 import (
@@ -23,10 +22,6 @@ import (
 // in the project's root folder.
 const ProjectFile = ".mcp.json"
 
-// ContainerFile is the config for Claude inside the repos' containers,
-// under .neptuno/claude, which compose mounts at /root/.claude.
-const ContainerFile = "neptuno-mcp.json"
-
 // Server is one MCP server a repo declares.
 type Server struct {
 	Repo string
@@ -39,7 +34,8 @@ type Server struct {
 	HostURL string
 	// ContainerURL reaches it from other containers on the compose network,
 	// such as http://locke:3000/_hyperdrive/mcp, where *.localhost names
-	// point back at the container itself.
+	// point back at the container itself. A repo's app uses it to call
+	// another repo's server.
 	ContainerURL string
 }
 
@@ -210,27 +206,6 @@ func WriteProject(root string, servers []Server, managed []string) ([]string, bo
 	doc["mcpServers"] = b
 	changed, err := writeJSON(path, doc, old)
 	return wrote, changed, err
-}
-
-// WriteContainer writes the config for Claude inside the containers, with
-// the servers' container URLs, to dir/neptuno-mcp.json. Neptuno owns the
-// file, so it is rewritten whole.
-func WriteContainer(dir string, servers []Server) (bool, error) {
-	list := map[string]entry{}
-	for _, s := range servers {
-		if s.ContainerURL != "" {
-			list[s.ID()] = entry{Type: "http", URL: s.ContainerURL}
-		}
-	}
-	path := filepath.Join(dir, ContainerFile)
-	old, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return false, err
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return false, err
-	}
-	return writeJSON(path, map[string]any{"mcpServers": list}, old)
 }
 
 // writeJSON writes v indented, unless the file already holds the same.

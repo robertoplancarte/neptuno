@@ -15,15 +15,11 @@ import (
 	"github.com/robertoplancarte/neptuno/internal/composefile"
 )
 
-// ClaudeVolume keeps Claude Code's sign-in and settings in the project's
-// git-ignored .neptuno folder, shared by every repo's container.
-const ClaudeVolume = "./.neptuno/claude:/root/.claude"
-
 // serviceSpec is the compose service `neptuno add` appends for a repo.
 type serviceSpec struct {
 	Name      string
 	DependsOn []string
-	// Volumes are mounted after the repo and Claude Code's config.
+	// Volumes are mounted after the repo.
 	Volumes []string
 }
 
@@ -35,7 +31,7 @@ func (s serviceSpec) lines(indent string) []string {
 		in + s.Name + ":",
 		in2 + "build: dockerfiles/" + s.Name,
 		in2 + "working_dir: /app",
-		fmt.Sprintf(`%svolumes: [%s]`, in2, quoteList(append([]string{"./repos/" + s.Name + ":/app", ClaudeVolume}, s.Volumes...))),
+		fmt.Sprintf(`%svolumes: [%s]`, in2, quoteList(append([]string{"./repos/" + s.Name + ":/app"}, s.Volumes...))),
 		in2 + "env_file: .neptuno/env/" + s.Name + ".env",
 		in2 + "command: sleep infinity    # overmind execs the real processes",
 	}

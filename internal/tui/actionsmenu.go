@@ -58,11 +58,6 @@ func (m *dashboard) availableActions() []menuAction {
 		}
 		add("r", "Restart "+r.Name+"'s processes", note)
 		add("e", "Switch "+r.Name+"'s env (now "+r.Env+")", "")
-		note = ""
-		if r.RunMode != "container" {
-			note = "runs on the host; Claude Code runs in a repo's container"
-		}
-		add("c", "Run Claude Code in "+r.Name+"'s container", note)
 		if len(r.MCP) > 0 {
 			add("m", "Copy or add "+r.Name+"'s MCP servers", "")
 		}
@@ -77,6 +72,7 @@ func (m *dashboard) availableActions() []menuAction {
 		all = "Unselect all"
 	}
 	add("a", all, "")
+	add("c", "Open Claude Code below the dashboard", "")
 	add("n", "Add a repo", "")
 	add("f", "Refresh", "")
 	return list

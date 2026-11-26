@@ -35,6 +35,7 @@ func NewRootCommand() *cobra.Command {
 		newStatusCommand(),
 		newDashboardCommand(),
 		newClaudeCommand(),
+		newExecCommand(),
 		newMCPCommand(),
 		newEnvCommand(),
 		newRestartCommand(),

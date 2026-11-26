@@ -23,15 +23,15 @@ Work from the outside in and stop at the first thing that is wrong.
    `neptuno container-exec`. `neptuno status` explains a process that
    stopped because its port or server pid file was taken, and by what. Run
    the failing one by hand to see its error:
-   `docker compose exec -T <repo> sh -c '<command from procfiles/<repo>/Procfile>'`.
+   `neptuno exec <repo> '<command from procfiles/<repo>/Procfile>'`.
    Then `neptuno restart <repo>:<process>`.
 5. **Proxy.** A 502 from `http://<repo>.localhost` means Caddy reached no
    one. Check that the `Caddyfile` site for the repo proxies to
    `<repo>:<port>`, and that the app listens on `0.0.0.0` at that port, not
    `127.0.0.1`:
-   `docker compose exec -T proxy wget -qO- http://<repo>:<port>/`.
+   `neptuno exec proxy -- wget -qO- http://<repo>:<port>/`.
    After editing the Caddyfile, run
-   `docker compose exec proxy caddy reload --config /etc/caddy/Caddyfile`.
+   `neptuno exec proxy -- caddy reload --config /etc/caddy/Caddyfile`.
 6. **Image.** After changing `dockerfiles/<repo>/Dockerfile`, rebuild:
    `docker compose build <repo>` and `neptuno up -d <repo>`.
 7. **Clean slate.** For a fresh database once:

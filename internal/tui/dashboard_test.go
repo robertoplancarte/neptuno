@@ -77,10 +77,6 @@ func TestDashboardKeys(t *testing.T) {
 	if !strings.Contains(m.message, "docs has no window") {
 		t.Errorf("enter on a stopped repo: %q", m.message)
 	}
-	key(m, "c")
-	if !strings.Contains(m.message, "container") {
-		t.Errorf("claude on a host repo: %q", m.message)
-	}
 	key(m, "r")
 	if !strings.Contains(m.message, "not running") {
 		t.Errorf("restart on a stopped repo: %q", m.message)
@@ -351,6 +347,29 @@ func TestWarningsShowAndWrap(t *testing.T) {
 	m.Update(hostMsg{"overmind for shop (pid 9) is still running"})
 	if lines := m.projectLines(); !strings.Contains(ansi.Strip(lines[len(lines)-1]), "overmind for shop") {
 		t.Errorf("project panel: %q", lines)
+	}
+}
+
+func TestClaudeKeySelectsTheClaudePane(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-0/default,1,0")
+	m := newTestDashboard()
+	m.opts.Neptuno = "/bin/neptuno"
+	var ran []string
+	m.opts.Exec = func(name string, args ...string) (string, error) {
+		ran = append(ran, name+" "+strings.Join(args, " "))
+		return "", nil
+	}
+	key(m, "down") // docs, a host repo: c works on any row
+	cmd := key(m, "c")
+	if cmd == nil {
+		t.Fatal("c did nothing")
+	}
+	m.Update(cmd())
+	if !reflect.DeepEqual(ran, []string{"/bin/neptuno claude --detach"}) {
+		t.Errorf("ran %q", ran)
+	}
+	if !strings.Contains(m.message, "open Claude Code done") {
+		t.Errorf("message = %q", m.message)
 	}
 }
 

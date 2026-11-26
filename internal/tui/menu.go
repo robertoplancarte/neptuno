@@ -103,22 +103,13 @@ func (m *dashboard) menuView() string {
 			b.WriteString("  " + it.label + "\n")
 		}
 	}
-	b.WriteString("\n" + labelStyle.Render("Claude in the project folder already gets them from .mcp.json, and `neptuno claude` in the containers.") + "\n")
+	b.WriteString("\n" + labelStyle.Render("Claude Code below the dashboard already gets them from the project's .mcp.json.") + "\n")
 	return b.String()
 }
 
 // registerMCP runs `claude mcp add --scope user` in the background.
 func (m *dashboard) registerMCP(s mcp.Server) tea.Cmd {
-	run := m.opts.Exec
-	if run == nil {
-		root := m.opts.Root
-		run = func(name string, args ...string) (string, error) {
-			cmd := exec.Command(name, args...)
-			cmd.Dir = root
-			out, err := cmd.CombinedOutput()
-			return string(out), err
-		}
-	}
+	run := m.execer()
 	args := claudeMCPAddArgs(s)
 	action := "add " + s.ID() + " to Claude Code"
 	m.message = action + "…"
@@ -130,6 +121,21 @@ func (m *dashboard) registerMCP(s mcp.Server) tea.Cmd {
 			}
 		}
 		return doneMsg{action, err}
+	}
+}
+
+// execer runs a command in the project folder in the background and
+// returns its output: opts.Exec, or the real command.
+func (m *dashboard) execer() func(name string, args ...string) (string, error) {
+	if m.opts.Exec != nil {
+		return m.opts.Exec
+	}
+	root := m.opts.Root
+	return func(name string, args ...string) (string, error) {
+		cmd := exec.Command(name, args...)
+		cmd.Dir = root
+		out, err := cmd.CombinedOutput()
+		return string(out), err
 	}
 }
 

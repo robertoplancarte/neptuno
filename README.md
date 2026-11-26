@@ -6,7 +6,7 @@ compose for containers, overmind for processes and tmux for terminals. It aims
 to be opinionated enough to get you going fast, and customizable enough to run
 just the way you work.
 
-> Status: early. `init`, `add`, `up`, `down`, `claude`, `mcp`, `env use/show` and the dashboard work; `sync` and `doctor` are on the way.
+> Status: early. `init`, `add`, `up`, `down`, `exec`, `claude`, `mcp`, `env use/show` and the dashboard work; `sync` and `doctor` are on the way.
 
 ## Install
 
@@ -47,7 +47,10 @@ acme/
 ├── neptuno.yml      # optional project config
 ├── AGENTS.md        # tells coding agents in this folder how the project works
 ├── CLAUDE.md        # @AGENTS.md, so Claude Code reads the same
-├── .claude/skills/  # step-by-step guides agents load when a task needs them
+├── .claude/
+│   ├── settings.json  # Claude Code may edit repos/ and run neptuno exec without asking
+│   ├── agents/        # a subagent per repo, written by neptuno add
+│   └── skills/        # step-by-step guides agents load when a task needs them
 ├── environments/
 │   └── _shared/     # base.env and local.env every repo gets
 ├── dockerfiles/     # dockerfiles/<repo>/Dockerfile
@@ -334,7 +337,7 @@ to a plain list.
 | `s` | stop them (`neptuno down`) |
 | `r` | restart a repo's processes |
 | `e` | switch a repo's env, then restart it if it is running |
-| `c` | open Claude Code in a repo's container |
+| `c` | move to Claude Code, in the pane below the dashboard |
 | `m` | copy a repo's MCP URLs, or add its servers to Claude Code |
 | `n` | add a repo (see below) |
 | `q` | quit |
@@ -401,30 +404,76 @@ attaching lands on it. Quitting it closes that window, and the next `neptuno`
 or `neptuno up` brings it back. `neptuno status` prints
 the same table once, for scripts and terminals without a TUI.
 
-## Claude Code in your containers
+## Claude Code
 
-Every built-in stack installs [Claude Code](https://claude.com/claude-code) in
-its dev image. Run it inside a repo's container, next to the code, tools and
-services the app really uses:
+Claude Code runs on your machine, in the project folder, in the pane below
+the dashboard: the dashboard window opens it when [Claude
+Code](https://claude.com/claude-code) is installed. One session sees every
+repo. It edits the code in `repos/` directly and runs each repo's own tools
+in that repo's container, so nothing about Claude lives in the images.
 
 ```sh
-neptuno claude api                 # opens a claude tab in api's window, next to its processes
-neptuno claude api -- --continue   # arguments after -- go to claude
-cd repos/api && neptuno claude     # the repo defaults to the folder you're in
+neptuno claude                 # select the Claude pane, opening it (and the dashboard) if needed
+neptuno claude -- --continue   # arguments after -- go to claude when the pane starts
 ```
 
-It starts the repo if needed. Claude gets a `claude` tab among the repo's
-process tabs (`Ctrl-b Ctrl-b n` cycles through them), and quitting it closes
-the tab and leaves the app running. `neptuno down <repo>` closes it with the
-processes. For a repo whose processes an older Neptuno started, it opens a
-`claude-<repo>` window instead until you run `neptuno down` and `neptuno up`
-for that repo. Sign-in and settings live in `.neptuno/claude`,
-mounted at `/root/.claude` in every repo `neptuno add` creates, so you sign in
-once per project and it survives rebuilds. For services added before this, add
-`"./.neptuno/claude:/root/.claude"` to their `volumes` (or set
-`CLAUDE_CODE_OAUTH_TOKEN` in `environments/_shared/*.local.env`), and rebuild
-the image with `docker compose build <repo>` after adding Claude Code to its
-Dockerfile.
+`c` in the dashboard does the same.
+
+### Running a repo's tools: `neptuno exec`
+
+```sh
+neptuno exec api -- bin/rails test
+neptuno exec api 'bin/rails db:migrate && bin/rails test'   # one argument runs with sh -c
+neptuno exec postgres -- psql -U postgres                   # any compose service
+cd repos/api/engines/billing && neptuno exec -- bin/rails test
+```
+
+`neptuno exec <repo> -- <command>` runs the command in the repo's container
+with `docker compose exec`, so it gets the repo's Ruby, Node or Python, its
+packages and its env, and reaches the shared services by name. It starts the
+container first, as `neptuno up --detach` does, when it isn't running. Run
+from a subfolder of `repos/<repo>`, the command runs in the same folder of
+the container (found from the repo's mount in `compose.yml`), and inside a
+repo's folder the repo can be left out. It gets a terminal when you have one
+and plain output when piped, and exits with the command's status. A `run:
+host` repo runs the command in `repos/<repo>` on your machine, with the
+repo's env.
+
+### A subagent per repo
+
+Every repo gets a Claude Code [subagent](https://code.claude.com/docs/en/sub-agents)
+in `.claude/agents/<repo>.md`, named after it. It changes files in its own
+repo only, runs commands with `neptuno exec <repo>`, and ends with a report
+of what it changed and checked. The main session hands it work inside one
+repo, and splits work across repos into one task per repo that run in
+parallel, then checks the results. The `neptuno-delegate-to-repo` skill
+spells this out. `neptuno add`, `neptuno up` and `neptuno mcp sync` write a
+missing one and never overwrite one you edited, so add a repo's own
+conventions to it.
+
+### Permissions
+
+`neptuno init` writes `.claude/settings.json`, which lets Claude edit files
+under `repos/` and run `neptuno exec`, `neptuno status`, `neptuno up -d`,
+`neptuno restart`, `docker compose ps` and `logs`, and `git -C repos/...`
+without asking, and never edit `.neptuno/`. Claude asks before anything
+else, such as editing the project's own files or running other commands on
+your machine. Claude now runs with your user's access rather than in a
+container, so keep the rules narrow; put personal additions in the
+git-ignored `.claude/settings.local.json`.
+
+### Projects from before Claude ran on the host
+
+Earlier versions installed Claude Code in every stack's image and ran it in
+the repos' containers with `neptuno claude <repo>`. In such a project:
+
+- Delete `AGENTS.md` and `.claude/skills/neptuno-delegate-to-repo` (or merge
+  your edits by hand) and run `neptuno mcp sync`, which writes the new
+  versions, `.claude/settings.json` and the repos' subagents.
+- Optionally drop `"./.neptuno/claude:/root/.claude"` from the repos'
+  `volumes` in `compose.yml` and the Claude Code lines from
+  `dockerfiles/<repo>/Dockerfile`, then `docker compose build <repo>`.
+  `.neptuno/claude` can go too.
 
 ## MCP servers your repos serve
 
@@ -438,17 +487,15 @@ repos:
       hyperdrive: /_hyperdrive/mcp
 ```
 
-The server is reached at a different address depending on where Claude runs,
-and Neptuno hands each Claude the one that works there:
-
-| Claude runs | It gets | Address |
-| --- | --- | --- |
-| In the project folder, in the terminal or the Claude desktop app's Code tab | `.mcp.json` in the project root | `http://locke.localhost/_hyperdrive/mcp`, through Caddy |
-| In a repo's container (`neptuno claude <repo>`) | `--mcp-config /root/.claude/neptuno-mcp.json` | `http://locke:3000/_hyperdrive/mcp`, on the compose network |
-
-Inside a container `locke.localhost` points back at that container, so the
-Caddy address does not work there. `neptuno up` rewrites both files each time
-it runs, and `neptuno mcp sync` does it without starting anything. Servers
+Claude Code runs on your machine in the project folder, so it reaches the
+server through Caddy, at `http://locke.localhost/_hyperdrive/mcp`, from
+`.mcp.json` in the project root; the repos' subagents get the same servers.
+That covers Claude below the dashboard, in any terminal and in the Claude
+desktop app's Code tab. A repo's app that calls another repo's server from
+its container uses the compose address instead, `http://locke:3000/_hyperdrive/mcp`,
+since inside a container `locke.localhost` points back at that container.
+`neptuno up` rewrites `.mcp.json` each time it runs, and `neptuno mcp sync`
+does it without starting anything. Servers
 you add to `.mcp.json` yourself are kept, and Claude asks you to approve
 the project's servers the first time it starts in the folder.
 `neptuno mcp` lists every declared server with both addresses. The
@@ -457,14 +504,7 @@ whether each one answers. Repos that serve one have `(mcp)` after their
 names, and the project panel shows whether `.mcp.json` is current and
 whether Claude desktop has the project. `m` opens a menu to copy a server's
 URLs or its `claude mcp add` command, or to add it to Claude Code for every
-folder (`--scope user`). A repo's own `.mcp.json` in
-`repos/<repo>` is still read by Claude in its container, so keep
-`*.localhost` addresses out of it.
-
-A Claude session in the project folder sees every repo. It can run tools in
-a container with `docker compose exec -T <repo> ...`, and hand a task to the
-Claude inside a repo's container with
-`docker compose exec -T <repo> claude -p "<task>" --mcp-config /root/.claude/neptuno-mcp.json`.
+folder (`--scope user`).
 
 ### Instructions for coding agents
 
@@ -473,8 +513,10 @@ folder how the project works, in formats more than one tool reads:
 
 | File | Read by | Holds |
 | --- | --- | --- |
-| `AGENTS.md` | Cursor, Codex, Copilot and other tools that follow the AGENTS.md convention | the layout, the commands, working inside containers, MCP servers |
+| `AGENTS.md` | Cursor, Codex, Copilot and other tools that follow the AGENTS.md convention | the layout, the commands, `neptuno exec`, the subagents, MCP servers |
 | `CLAUDE.md` | Claude Code | `@AGENTS.md`, which imports it, plus any notes only for Claude |
+| `.claude/settings.json` | Claude Code | the permission rules above |
+| `.claude/agents/<repo>.md` | Claude Code | each repo's subagent |
 | `.claude/skills/<name>/SKILL.md` | Claude Code, and other tools that support Agent Skills | `neptuno-add-repo`, `neptuno-debug-service` and `neptuno-delegate-to-repo`: step-by-step guides loaded only when a task needs one |
 
 They are yours to edit: add your team's conventions to `AGENTS.md` and your
@@ -503,9 +545,9 @@ tools:
 | --- | --- |
 | `neptuno_status` | what `neptuno status` prints |
 | `neptuno_up`, `neptuno_down`, `neptuno_restart` | start, stop and restart repos and services |
-| `neptuno_exec` | run a shell command in a repo's container (or in `repos/<repo>` for `run: host`) |
+| `neptuno_exec` | run a shell command in a repo's container with `neptuno exec` (or in `repos/<repo>` for `run: host`) |
 | `neptuno_logs` | the end of a container's output |
-| `neptuno_ask_repo_claude` | hand a task to Claude Code in a repo's container and return its answer |
+| `neptuno_ask_repo_claude` | hand a task to the repo's subagent, through `claude -p` on your machine, and return its answer |
 | `neptuno_mcp_servers` | the declared servers and whether they are reachable |
 | `<repo>-<server>__<tool>` | every tool of every declared server, forwarded |
 
