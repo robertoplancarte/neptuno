@@ -396,13 +396,7 @@ func (m *dashboard) dispatch(key string) (tea.Model, tea.Cmd) {
 			return m, m.run("restart "+row.Name, []string{row.Name}, "restart", row.Name)
 		}
 	case "c":
-		switch {
-		case !ok:
-		case !row.Repo || row.RunMode != "container":
-			m.message = "Claude Code runs in a repo's container"
-		default:
-			return m, m.foreground("claude "+row.Name, "claude", row.Name)
-		}
+		return m, m.claude()
 	case "enter":
 		switch {
 		case !ok:
@@ -463,8 +457,31 @@ func switchEnvCommands(r orchestrate.ServiceStatus, config string) [][]string {
 	return cmds
 }
 
-// foreground runs an interactive neptuno command, such as claude, with the
-// terminal, keeping its output on screen when it fails.
+// claude moves to the project's Claude Code, which runs on the host in the
+// pane below the dashboard: `neptuno claude --detach` opens the pane if it
+// was closed and selects it. Outside tmux there is no pane, so Claude runs
+// in this terminal until it exits.
+func (m *dashboard) claude() tea.Cmd {
+	const action = "open Claude Code"
+	if os.Getenv("TMUX") == "" {
+		cmd := exec.Command("claude")
+		cmd.Dir = m.opts.Root
+		return tea.ExecProcess(cmd, func(err error) tea.Msg { return doneMsg{action, err} })
+	}
+	run := m.execer()
+	return func() tea.Msg {
+		out, err := run(m.opts.Neptuno, "claude", "--detach")
+		if err != nil {
+			if msg := strings.TrimSpace(out); msg != "" {
+				err = fmt.Errorf("%w: %s", err, lastLine(msg))
+			}
+		}
+		return doneMsg{action, err}
+	}
+}
+
+// foreground runs an interactive neptuno command with the terminal,
+// keeping its output on screen when it fails.
 func (m *dashboard) foreground(action string, args ...string) tea.Cmd {
 	command := procfile.Quote(m.opts.Neptuno)
 	for _, a := range args {
@@ -838,9 +855,6 @@ func (m *dashboard) details(r orchestrate.ServiceStatus) string {
 		var win []string
 		if r.Window {
 			win = append(win, r.Name+" (enter)")
-		}
-		if r.Claude {
-			win = append(win, "claude")
 		}
 		if len(win) > 0 {
 			add("Windows", strings.Join(win, ", "))

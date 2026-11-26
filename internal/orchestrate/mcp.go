@@ -2,16 +2,15 @@ package orchestrate
 
 import (
 	"fmt"
+	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/robertoplancarte/neptuno/internal/mcp"
+	"github.com/robertoplancarte/neptuno/internal/project"
+	"github.com/robertoplancarte/neptuno/internal/scaffold"
 	"github.com/robertoplancarte/neptuno/internal/state"
 )
-
-// ContainerMCPConfig is where Claude inside a repo's container finds the
-// project's MCP servers: .neptuno/claude/neptuno-mcp.json, through the
-// mount at ClaudeConfigDir.
-const ContainerMCPConfig = ClaudeConfigDir + "/" + mcp.ContainerFile
 
 // MCPServers lists the MCP servers the repos declare in neptuno.yml, with
 // their URLs, and any problems finding them.
@@ -21,8 +20,8 @@ func (o *Orchestrator) MCPServers() ([]mcp.Server, []string) {
 }
 
 // SyncMCP writes the declared MCP servers into the project's .mcp.json, for
-// Claude on the host started in the project folder, and into
-// .neptuno/claude/neptuno-mcp.json, for Claude in the repos' containers.
+// Claude on the host started in the project folder, and gives every repo a
+// subagent in .claude/agents where it has none.
 func (o *Orchestrator) SyncMCP() ([]mcp.Server, error) {
 	p := o.Project
 	servers, warnings := o.MCPServers()
@@ -46,10 +45,11 @@ func (o *Orchestrator) SyncMCP() ([]mcp.Server, error) {
 			return servers, err
 		}
 	}
-	if _, err := mcp.WriteContainer(p.Path(".neptuno", "claude"), servers); err != nil {
-		return servers, err
+	agents, err := scaffold.WriteRepoAgents(p.Root, o.repoAgents())
+	for _, a := range agents {
+		fmt.Fprintf(o.Log, "Wrote %s, the subagent that works in %s\n", a, strings.TrimSuffix(filepath.Base(a), ".md"))
 	}
-	return servers, nil
+	return servers, err
 }
 
 // MCPSummary is where the project's MCP servers are set up, for the
@@ -75,4 +75,18 @@ func (o *Orchestrator) MCPSummary() MCPSummary {
 		sum.Desktop = e != nil
 	}
 	return sum
+}
+
+// repoAgents describes each repo for its subagent.
+func (o *Orchestrator) repoAgents() []scaffold.RepoAgent {
+	p := o.Project
+	var out []scaffold.RepoAgent
+	for _, r := range p.Repos {
+		a := scaffold.RepoAgent{Project: p.Name, Name: r, Host: p.RunMode(r) == project.RunHost}
+		if !a.Host {
+			a.Workdir = o.repoMount(r)
+		}
+		out = append(out, a)
+	}
+	return out
 }

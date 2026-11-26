@@ -110,20 +110,3 @@ func TestWriteProjectWithNothingDeclared(t *testing.T) {
 		t.Error("created .mcp.json with no servers")
 	}
 }
-
-func TestWriteContainer(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "claude")
-	servers := []Server{{Repo: "locke", Name: "hyperdrive", ContainerURL: "http://locke:3000/_hyperdrive/mcp"}}
-	if changed, err := WriteContainer(dir, servers); err != nil || !changed {
-		t.Fatalf("WriteContainer = %v, %v", changed, err)
-	}
-	b, _ := os.ReadFile(filepath.Join(dir, ContainerFile))
-	if !strings.Contains(string(b), `"locke-hyperdrive": {
-      "type": "http",
-      "url": "http://locke:3000/_hyperdrive/mcp"`) {
-		t.Errorf("%s =\n%s", ContainerFile, b)
-	}
-	if changed, _ := WriteContainer(dir, servers); changed {
-		t.Error("rewrote an up-to-date config")
-	}
-}

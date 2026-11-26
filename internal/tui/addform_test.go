@@ -130,7 +130,7 @@ func TestActionsTabListsAndRunsActions(t *testing.T) {
 	}
 	view := m.View()
 	for _, want := range []string{"Actions for api", "Open api's window", "Start api", "Stop api", "Restart api's processes",
-		"Switch api's env (now local)", "Run Claude Code in api's container", "Add a repo", "choose action"} {
+		"Switch api's env (now local)", "Open Claude Code below the dashboard", "Add a repo", "choose action"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("Actions tab missing %q:\n%s", want, view)
 		}
@@ -157,7 +157,7 @@ func TestActionsTabListsAndRunsActions(t *testing.T) {
 		t.Fatalf("cursor on %q", r.Name)
 	}
 	m.tab = tabActions
-	if view := m.View(); !strings.Contains(view, "not running; start it with u") || !strings.Contains(view, "runs on the host") {
+	if view := m.View(); !strings.Contains(view, "not running; start it with u") {
 		t.Errorf("docs' actions don't say why they can't run:\n%s", view)
 	}
 	list := m.availableActions()

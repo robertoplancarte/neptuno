@@ -49,7 +49,12 @@ description: Add a repo to this Neptuno project, either an existing git repo or 
    ```
 
    then run `neptuno mcp sync` and check it with `neptuno mcp`.
-7. Commit the new files in this project (`compose.yml`, `Caddyfile`,
+7. `neptuno add` also writes `.claude/agents/<name>.md`, the repo's
+   subagent: it works in `repos/<name>` and runs commands with
+   `neptuno exec <name>`. Add the repo's own conventions to it if they
+   aren't in the repo's `AGENTS.md` or `CLAUDE.md`.
+8. Commit the new files in this project (`compose.yml`, `Caddyfile`,
    `dockerfiles/<name>`, `procfiles/<name>`, `environments/<name>`,
-   `.gitmodules` and the `repos/<name>` submodule). The app's own code is
+   `.claude/agents/<name>.md`, `.gitmodules` and the `repos/<name>`
+   submodule). The app's own code is
    committed inside `repos/<name>`.

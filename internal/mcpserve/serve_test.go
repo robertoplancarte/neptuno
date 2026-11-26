@@ -167,9 +167,9 @@ func TestOwnTools(t *testing.T) {
 	}
 	want := []string{
 		"/p: /bin/neptuno up --detach locke",
-		"/p: docker compose exec -T locke sh -c bin/rails test",
-		"/p/repos/docs: sh -c npm test",
-		"/p: docker compose exec -T locke claude -p fix the build --mcp-config /root/.claude/neptuno-mcp.json",
+		"/p: /bin/neptuno exec locke -- bin/rails test",
+		"/p: /bin/neptuno exec docs -- npm test",
+		"/p: claude -p Use the locke subagent for this task, then report what it did and found.\n\nfix the build",
 		"/p: docker compose logs --no-color --tail 100 locke",
 	}
 	if !slices.Equal(rec.cmds, want) {

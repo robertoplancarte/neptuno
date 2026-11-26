@@ -111,7 +111,7 @@ func TestAddRunsGeneratorInContainer(t *testing.T) {
 	}
 
 	compose := read(t, filepath.Join(root, "compose.yml"))
-	if !strings.Contains(compose, `"./.neptuno/claude:/root/.claude", "shop_bundle:/usr/local/bundle"]`) || !strings.Contains(compose, "\n  shop_bundle:\n") {
+	if !strings.Contains(compose, `"./repos/shop:/app", "shop_bundle:/usr/local/bundle"]`) || !strings.Contains(compose, "\n  shop_bundle:\n") {
 		t.Errorf("gem volume not mounted and declared:\n%s", compose)
 	}
 	if procfile := read(t, filepath.Join(root, "procfiles/shop/Procfile")); !strings.Contains(procfile, "css: bin/rails tailwindcss:watch") {

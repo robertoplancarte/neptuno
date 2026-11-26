@@ -14,7 +14,7 @@ import (
 	"text/template"
 )
 
-//go:embed templates/*.tmpl templates/skills/*/SKILL.md.tmpl
+//go:embed templates/*.tmpl templates/skills/*/SKILL.md.tmpl templates/claude/*.tmpl
 var templates embed.FS
 
 // Folders are the four convention folders. Each holds one subfolder per repo.
@@ -137,12 +137,14 @@ func Init(opts Options) ([]string, error) {
 
 // AgentFiles maps the files that tell coding agents how to work in the
 // project to their templates: AGENTS.md, which Cursor, Codex and others
-// read, CLAUDE.md, which imports it for Claude Code, and the skills in
+// read, CLAUDE.md, which imports it for Claude Code, Claude Code's
+// permission rules in .claude/settings.json, and the skills in
 // .claude/skills.
 func AgentFiles() []struct{ Path, Template string } {
 	out := []struct{ Path, Template string }{
 		{"AGENTS.md", "AGENTS.md.tmpl"},
 		{"CLAUDE.md", "CLAUDE.md.tmpl"},
+		{SettingsFile, "claude/settings.json.tmpl"},
 	}
 	skills, _ := fs.Glob(templates, "templates/skills/*/SKILL.md.tmpl")
 	for _, t := range skills {
@@ -215,4 +217,63 @@ func render(name string, data any) ([]byte, error) {
 		return nil, fmt.Errorf("render %s: %w", name, err)
 	}
 	return buf.Bytes(), nil
+}
+
+// SettingsFile holds the project's Claude Code permission rules. It lets
+// Claude edit files under repos/ and run commands in the repos' containers
+// with neptuno exec without asking, and keeps it out of .neptuno/. Claude
+// asks before anything else, such as editing files outside repos/.
+const SettingsFile = ".claude/settings.json"
+
+// AgentsDir holds a Claude Code subagent for each repo.
+const AgentsDir = ".claude/agents"
+
+// RepoAgent describes a repo for its subagent.
+type RepoAgent struct {
+	// Project is the project's name.
+	Project string
+	// Name is the repo's.
+	Name string
+	// Host is true for a repo with run: host, whose commands run in
+	// repos/<repo> on the host instead of a container.
+	Host bool
+	// Workdir is where the repo's container mounts repos/<repo>, such as
+	// /app, or "" when compose doesn't.
+	Workdir string
+}
+
+// RepoAgentPath is where a repo's subagent lives, relative to the project
+// root.
+func RepoAgentPath(repo string) string {
+	return AgentsDir + "/" + repo + ".md"
+}
+
+// WriteRepoAgents writes a Claude Code subagent for each repo that has
+// none, in .claude/agents/<repo>.md, leaving the ones there alone so they
+// can be edited, and returns the paths it wrote, relative to root. Each
+// subagent owns one repo: it edits the code in repos/<repo> and runs the
+// repo's tools in its container with neptuno exec.
+func WriteRepoAgents(root string, repos []RepoAgent) ([]string, error) {
+	var wrote []string
+	for _, r := range repos {
+		rel := RepoAgentPath(r.Name)
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if _, err := os.Stat(path); err == nil {
+			continue
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return wrote, err
+		}
+		out, err := render("claude/agent.md.tmpl", r)
+		if err != nil {
+			return wrote, err
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return wrote, err
+		}
+		if err := os.WriteFile(path, out, 0o644); err != nil {
+			return wrote, err
+		}
+		wrote = append(wrote, rel)
+	}
+	return wrote, nil
 }

@@ -1,9 +1,11 @@
 package scaffold
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -133,6 +135,7 @@ func TestWriteAgentFiles(t *testing.T) {
 	}
 	want := []string{
 		"AGENTS.md",
+		".claude/settings.json",
 		".claude/skills/neptuno-add-repo/SKILL.md",
 		".claude/skills/neptuno-debug-service/SKILL.md",
 		".claude/skills/neptuno-delegate-to-repo/SKILL.md",
@@ -143,10 +146,19 @@ func TestWriteAgentFiles(t *testing.T) {
 	if got := read(t, filepath.Join(root, "CLAUDE.md")); got != "mine\n" {
 		t.Errorf("overwrote CLAUDE.md: %q", got)
 	}
-	if got := read(t, filepath.Join(root, "AGENTS.md")); !strings.HasPrefix(got, "# acme\n") || !strings.Contains(got, "neptuno-mcp.json") {
+	if got := read(t, filepath.Join(root, "AGENTS.md")); !strings.HasPrefix(got, "# acme\n") || !strings.Contains(got, "neptuno exec <repo> -- <command>") {
 		t.Errorf("AGENTS.md =\n%s", got)
 	}
-	for _, path := range want[1:] {
+	var settings struct {
+		Permissions struct{ Allow, Deny []string }
+	}
+	if err := json.Unmarshal([]byte(read(t, filepath.Join(root, ".claude/settings.json"))), &settings); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(settings.Permissions.Allow, "Edit(/repos/**)") || !slices.Contains(settings.Permissions.Allow, "Bash(neptuno exec *)") {
+		t.Errorf("settings.json allows %q", settings.Permissions.Allow)
+	}
+	for _, path := range want[2:] {
 		skill := read(t, filepath.Join(root, path))
 		name := filepath.Base(filepath.Dir(path))
 		if !strings.HasPrefix(skill, "---\nname: "+name+"\ndescription: ") || strings.Contains(skill, "{{") {

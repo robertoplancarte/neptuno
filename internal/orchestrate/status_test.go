@@ -39,7 +39,7 @@ func TestStatus(t *testing.T) {
 		"docker compose ps --all --format json": `{"Service":"api","State":"running","Health":"","Publishers":[]}
 {"Service":"postgres","State":"running","Health":"healthy","Publishers":[{"PublishedPort":5432,"TargetPort":5432},{"PublishedPort":5432,"TargetPort":5432}]}
 {"Service":"web","State":"exited","Health":"","Publishers":null}`,
-		"tmux list-windows -t =neptuno-acme -F #{window_name}": "neptuno\napi\nclaude-api",
+		"tmux list-windows -t =neptuno-acme -F #{window_name}": "neptuno\napi",
 		"overmind status -s .neptuno/run/api.sock":             "PROCESS   PID       STATUS\nweb       101       running\nworker    102       dead\n",
 		"api: git log -1 --format=%h%x1f%cI%x1f%an%x1f%s":      "abc1234\x1f2026-10-30T14:02:00Z\x1fRoberto\x1fAdd login",
 		"api: git rev-parse --abbrev-ref HEAD":                 "main",
@@ -62,7 +62,7 @@ func TestStatus(t *testing.T) {
 	}
 
 	api := got["api"]
-	if !api.Repo || !api.Overmind || !api.Window || !api.Claude || api.Env != "local" || api.State() != "partial" {
+	if !api.Repo || !api.Overmind || !api.Window || api.Env != "local" || api.State() != "partial" {
 		t.Errorf("api = %+v (state %s)", api, api.State())
 	}
 	if want := []string{"local", "staging"}; !reflect.DeepEqual(api.Envs, want) {

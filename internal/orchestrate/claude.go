@@ -3,187 +3,85 @@ package orchestrate
 import (
 	"errors"
 	"fmt"
-	"os"
-	"slices"
 	"strings"
 
-	"github.com/robertoplancarte/neptuno/internal/mcp"
 	"github.com/robertoplancarte/neptuno/internal/procfile"
-	"github.com/robertoplancarte/neptuno/internal/project"
-	"gopkg.in/yaml.v3"
 )
-
-// ClaudeConfigDir is where Claude Code keeps its sign-in and settings in a
-// repo's container. compose mounts .neptuno/claude there.
-const ClaudeConfigDir = "/root/.claude"
 
 // ClaudeOptions configures Claude.
 type ClaudeOptions struct {
-	Repo string
-	// Args are passed to claude, such as a prompt or --continue.
+	// Args are passed to claude when its pane is started, such as
+	// --continue. A pane that is already open keeps its session.
 	Args []string
-	// Detach opens the window without attaching to it.
+	// Detach selects the pane without attaching to the session.
 	Detach bool
 }
 
-// ClaudeTab is the window Claude Code runs in inside a repo's overmind
-// session, next to the process windows.
-const ClaudeTab = "claude"
-
-// ClaudeWindow is the outer session's window Claude Code runs in for a repo
-// whose overmind an older neptuno started, without a known tmux socket.
-func ClaudeWindow(repo string) string {
-	return "claude-" + repo
-}
-
-// Claude runs Claude Code inside the repo's running container, in a claude
-// tab of the repo's window, next to its processes, starting the repo first if
-// needed. Quitting Claude closes the tab and leaves the processes running.
+// Claude shows the project's Claude Code session: the pane below the
+// dashboard, in the first window of the project's tmux session, where
+// Claude runs on the host in the project folder. It opens the dashboard
+// window and the pane when either is missing, selects the pane, and
+// attaches to the session, or switches to it inside tmux.
+//
+// Claude edits code in repos/ directly and runs the repos' own tools in
+// their containers with neptuno exec, so nothing about Claude lives in the
+// containers.
 func (o *Orchestrator) Claude(opts ClaudeOptions) error {
-	p, repo := o.Project, opts.Repo
-	if !p.IsRepo(repo) {
-		return fmt.Errorf("unknown repo %q", repo)
-	}
-	if p.RunMode(repo) == project.RunHost {
-		return fmt.Errorf("%s runs on the host (run: host), so run claude in repos/%s directly", repo, repo)
-	}
-	if _, ok := p.Services[repo]; !ok {
-		return fmt.Errorf("compose.yml has no %s service to run Claude Code in", repo)
-	}
-	if err := o.checkTools(true, false); err != nil {
-		return err
-	}
 	if o.Runner.LookPath("tmux") != nil {
 		return errors.New("tmux not found on PATH")
 	}
-	if err := os.MkdirAll(p.Path(".neptuno", "claude"), 0o755); err != nil {
-		return err
+	if o.Runner.LookPath("claude") != nil {
+		return errors.New("claude not found on PATH; install Claude Code from https://claude.com/claude-code")
 	}
-	if !o.mountsClaudeConfig(repo) {
-		fmt.Fprintf(o.Log, "warning: the %s service does not mount %s, so Claude Code's sign-in is lost when the container is recreated.\n"+
-			"Add \"./.neptuno/claude:%s\" to its volumes in compose.yml, or set CLAUDE_CODE_OAUTH_TOKEN in environments/_shared/*.local.env.\n",
-			repo, ClaudeConfigDir, ClaudeConfigDir)
-	}
-
-	running, _ := o.Runner.Output(p.Root, "docker", "compose", "ps", "--quiet", "--status", "running", repo)
-	if running == "" || !o.Runner.Check(p.Root, "overmind", "status", "-s", socket(repo)) {
-		fmt.Fprintf(o.Log, "%s is not running; starting it first\n", repo)
-		if err := o.Up(UpOptions{Selected: []string{repo}, Detach: true}); err != nil {
-			return err
-		}
-	}
-
-	servers, err := o.SyncMCP()
-	if err != nil {
+	if _, err := o.SyncMCP(); err != nil {
 		fmt.Fprintf(o.Log, "warning: could not write the MCP configs: %v\n", err)
 	}
-	claudeArgs := opts.Args
-	if hasContainerURL(servers) && o.mountsClaudeConfig(repo) {
-		claudeArgs = withMCPConfig(opts.Args)
+	if err := o.ensureDashboardWith(opts.Args); err != nil {
+		return err
 	}
-
-	q := procfile.Quote
-	args := []string{"docker", "compose", "exec", q(repo), "claude"}
-	for _, a := range claudeArgs {
-		args = append(args, q(a))
-	}
-	// Keep the window open on failure, such as claude missing from an
-	// older image, so the error can be read.
-	command := strings.Join(args, " ") +
-		`; status=$?; if [ $status -ne 0 ]; then echo; echo "claude exited with status $status. Press enter to close this window."; read _; fi`
-
-	windows, sock, ok := o.overmindWindows(repo)
-	if !ok {
-		fmt.Fprintf(o.Log, "%s's processes were started by an older neptuno, so Claude Code opens in its own window.\n"+
-			"Run `neptuno down %s` and `neptuno up %s` to get it as a tab in %s's window.\n", repo, repo, repo, repo)
-		return o.claudeWindow(opts, command)
-	}
-	if slices.Contains(windows, ClaudeTab) {
-		fmt.Fprintf(o.Log, "Claude Code is already open in %s's %s tab\n", repo, ClaudeTab)
-	} else {
-		fmt.Fprintf(o.Log, "Starting Claude Code in the %s container\n", repo)
-		if err := o.Runner.Run(p.Root, "tmux", "-S", sock, "new-window", "-d", "-n", ClaudeTab, "-c", p.Root, claudeMark+command); err != nil {
+	pane := o.claudePane()
+	if pane == "" {
+		if err := o.splitClaude(opts.Args); err != nil {
 			return err
 		}
+		if pane = o.claudePane(); pane == "" {
+			return errors.New("could not find the Claude Code pane in the dashboard window")
+		}
+	} else if len(opts.Args) > 0 {
+		fmt.Fprintln(o.Log, "Claude Code is already open below the dashboard, so the arguments for claude were not used.")
 	}
-	_ = o.Runner.Run(p.Root, "tmux", "-S", sock, "select-window", "-t", ":"+ClaudeTab)
+	_ = o.Runner.Run(o.Project.Root, "tmux", "select-window", "-t", o.target(DashboardWindow))
+	_ = o.Runner.Run(o.Project.Root, "tmux", "select-pane", "-t", pane)
 	if opts.Detach {
-		fmt.Fprintf(o.Log, "It is the %s tab of tmux window %s:%s\n", ClaudeTab, o.SessionName(), repo)
 		return nil
 	}
-	_ = o.Runner.Run(p.Root, "tmux", "select-window", "-t", o.target(repo))
 	return o.attach()
 }
 
-// claudeWindow opens Claude Code in a claude-<repo> window of the outer
-// session.
-func (o *Orchestrator) claudeWindow(opts ClaudeOptions, command string) error {
-	p, window := o.Project, ClaudeWindow(opts.Repo)
-	if o.hasWindow(window) {
-		fmt.Fprintf(o.Log, "Claude Code is already open in tmux window %s:%s\n", o.SessionName(), window)
-	} else {
-		fmt.Fprintf(o.Log, "Starting Claude Code in the %s container\n", opts.Repo)
-		if err := o.newWindow(window, command); err != nil {
-			return err
+// claudePane is the ID of the Claude Code pane in the dashboard window, or
+// "" when it has none.
+func (o *Orchestrator) claudePane() string {
+	out, err := o.Runner.Output(o.Project.Root, "tmux", "list-panes", "-t", o.target(DashboardWindow),
+		"-F", "#{pane_id}\t#{pane_start_command}")
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(out, "\n") {
+		id, command, _ := strings.Cut(line, "\t")
+		if strings.Contains(command, strings.TrimSpace(claudeMark)) {
+			return id
 		}
 	}
-	if opts.Detach {
-		fmt.Fprintf(o.Log, "Attach with: tmux attach -t %s:%s\n", o.SessionName(), window)
-		return nil
-	}
-	_ = o.Runner.Run(p.Root, "tmux", "select-window", "-t", o.target(window))
-	return o.attach()
+	return ""
 }
 
-// mountsClaudeConfig reports whether compose.yml or compose.override.yml
-// mounts something at the repo's Claude config dir.
-func (o *Orchestrator) mountsClaudeConfig(repo string) bool {
-	for _, name := range []string{"compose.yml", "compose.override.yml"} {
-		b, err := os.ReadFile(o.Project.Path(name))
-		if err != nil {
-			continue
-		}
-		var cf struct {
-			Services map[string]struct {
-				Volumes []any `yaml:"volumes"`
-			} `yaml:"services"`
-		}
-		if yaml.Unmarshal(b, &cf) != nil {
-			continue
-		}
-		for _, v := range cf.Services[repo].Volumes {
-			switch v := v.(type) {
-			case string:
-				if strings.HasSuffix(v, ":"+ClaudeConfigDir) || strings.Contains(v, ":"+ClaudeConfigDir+":") {
-					return true
-				}
-			case map[string]any:
-				if v["target"] == ClaudeConfigDir {
-					return true
-				}
-			}
-		}
+// claudeCommand runs Claude Code in the dashboard's pane, keeping the pane
+// open on failure so the error can be read.
+func claudeCommand(args []string) string {
+	command := "claude"
+	for _, a := range args {
+		command += " " + procfile.Quote(a)
 	}
-	return false
-}
-
-// withMCPConfig adds --mcp-config with the project's MCP servers to
-// claude's arguments. It goes after them, since --mcp-config takes every
-// argument up to the next flag, but before a "--", after which nothing is a
-// flag.
-func withMCPConfig(args []string) []string {
-	flag := []string{"--mcp-config", ContainerMCPConfig}
-	if i := slices.Index(args, "--"); i >= 0 {
-		return slices.Concat(args[:i], flag, args[i:])
-	}
-	return slices.Concat(args, flag)
-}
-
-func hasContainerURL(servers []mcp.Server) bool {
-	for _, s := range servers {
-		if s.ContainerURL != "" {
-			return true
-		}
-	}
-	return false
+	return claudeMark + command +
+		`; status=$?; if [ $status -ne 0 ]; then echo; echo "claude exited with status $status. Press enter to close this pane."; read _; fi`
 }

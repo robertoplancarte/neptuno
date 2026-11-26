@@ -36,6 +36,9 @@ type fakeRunner struct {
 	execOut string
 	// ps is what ps prints.
 	ps string
+	// panes is what list-panes prints for the dashboard window: each
+	// pane's ID and start command.
+	panes string
 }
 
 func (f *fakeRunner) Run(dir, name string, args ...string) error {
@@ -43,6 +46,9 @@ func (f *fakeRunner) Run(dir, name string, args ...string) error {
 	if name == "tmux" && args[0] == "kill-window" {
 		target := args[len(args)-1]
 		delete(f.windows, target[strings.LastIndex(target, ":")+1:])
+	}
+	if name == "tmux" && args[0] == "split-window" {
+		f.panes += "%9\t" + args[len(args)-1] + "\n"
 	}
 	if name == "tmux" && (args[0] == "new-session" || args[0] == "new-window") {
 		f.sessions = true
@@ -98,6 +104,9 @@ func (f *fakeRunner) Output(dir, name string, args ...string) (string, error) {
 			}
 		}
 		return "", nil
+	}
+	if name == "tmux" && args[0] == "list-panes" {
+		return strings.TrimSpace(f.panes), nil
 	}
 	if name == "tmux" && slices.Contains(args, "list-windows") {
 		return f.overmindWindows, nil
@@ -350,86 +359,6 @@ func read(t *testing.T, path string) string {
 	return string(b)
 }
 
-func TestClaudeInRunningContainer(t *testing.T) {
-	t.Setenv("TMUX", "")
-	o, f := setup(t)
-	f.containers["api"] = []string{"abc123"}
-	f.overminds[socket("api")] = true // started by an older neptuno: no tmux socket file
-	var log strings.Builder
-	o.Log = &log
-
-	if err := o.Claude(ClaudeOptions{Repo: "api", Args: []string{"--continue"}}); err != nil {
-		t.Fatal(err)
-	}
-	var got []string
-	for _, c := range f.cmds {
-		got = append(got, strings.ReplaceAll(c, o.Project.Root, "ROOT"))
-	}
-	want := []string{
-		"tmux new-session -d -s neptuno-acme -n neptuno -c ROOT /bin/neptuno dashboard",
-		claudeSplit("ROOT"),
-		"tmux new-window -d -t =neptuno-acme: -n claude-api -c ROOT docker compose exec api claude --continue; " +
-			`status=$?; if [ $status -ne 0 ]; then echo; echo "claude exited with status $status. Press enter to close this window."; read _; fi`,
-		"tmux select-window -t =neptuno-acme:claude-api",
-		"attach: tmux attach-session -t =neptuno-acme",
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("commands:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
-	}
-	if !strings.Contains(log.String(), "does not mount /root/.claude") {
-		t.Errorf("no warning about the missing config mount:\n%s", log.String())
-	}
-	if _, err := os.Stat(filepath.Join(o.Project.Root, ".neptuno/claude")); err != nil {
-		t.Error(".neptuno/claude not created")
-	}
-}
-
-func TestClaudeStartsStoppedContainerAndReusesWindow(t *testing.T) {
-	t.Setenv("TMUX", "")
-	o, f := setup(t)
-	compose := read(t, filepath.Join(o.Project.Root, "compose.yml"))
-	compose = strings.Replace(compose, "    env_file: .neptuno/env/api.env\n",
-		"    env_file: .neptuno/env/api.env\n    volumes: [\"./repos/api:/app\", \"./.neptuno/claude:/root/.claude\"]\n", 1)
-	if err := os.WriteFile(filepath.Join(o.Project.Root, "compose.yml"), []byte(compose), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	var log strings.Builder
-	o.Log = &log
-
-	if err := o.Claude(ClaudeOptions{Repo: "api", Detach: true}); err != nil {
-		t.Fatal(err)
-	}
-	if len(f.cmds) != 6 || !strings.HasPrefix(f.cmds[0], "docker compose up --detach postgres api") ||
-		!strings.Contains(f.cmds[1], "new-session -d -s neptuno-acme -n neptuno ") ||
-		f.cmds[2] != claudeSplit(o.Project.Root) ||
-		!strings.HasPrefix(f.cmds[3], "overmind start ") ||
-		!strings.Contains(f.cmds[4], "-n api ") || !strings.Contains(f.cmds[5], "-n claude-api ") {
-		t.Errorf("commands:\n%s", strings.Join(f.cmds, "\n"))
-	}
-	if strings.Contains(log.String(), "does not mount") {
-		t.Errorf("warned although the mount exists:\n%s", log.String())
-	}
-
-	f.cmds = nil
-	f.containers["api"] = []string{"abc123"}
-	if err := o.Claude(ClaudeOptions{Repo: "api", Detach: true}); err != nil {
-		t.Fatal(err)
-	}
-	if len(f.cmds) != 0 {
-		t.Errorf("second call ran %q, want nothing", f.cmds)
-	}
-}
-
-func TestClaudeRejectsHostAndUnknownRepos(t *testing.T) {
-	o, _ := setup(t)
-	if err := o.Claude(ClaudeOptions{Repo: "docs"}); err == nil || !strings.Contains(err.Error(), "runs on the host") {
-		t.Errorf("host repo: %v", err)
-	}
-	if err := o.Claude(ClaudeOptions{Repo: "nope"}); err == nil {
-		t.Error("unknown repo accepted")
-	}
-}
-
 func TestUpWritesTmuxConfigWithPaneDiedHook(t *testing.T) {
 	t.Setenv("TMUX", "")
 	o, _ := setup(t)
@@ -567,51 +496,6 @@ func TestDeadPaneCommandIsMarked(t *testing.T) {
 	}
 }
 
-func TestClaudeOpensATabInTheReposWindow(t *testing.T) {
-	t.Setenv("TMUX", "")
-	o, f := setup(t)
-	f.containers["api"] = []string{"abc123", "abc123"}
-	f.overminds[socket("api")] = true
-	if err := os.MkdirAll(o.Project.Path(".neptuno", "run"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(o.Project.Path(overmindTmuxFile("api")), []byte("/tmp/om\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	f.overmindWindows = "web\nworker\n"
-	o.Log = io.Discard
-
-	if err := o.Claude(ClaudeOptions{Repo: "api"}); err != nil {
-		t.Fatal(err)
-	}
-	var got []string
-	for _, c := range f.cmds {
-		got = append(got, strings.ReplaceAll(c, o.Project.Root, "ROOT"))
-	}
-	want := []string{
-		"tmux -S /tmp/om new-window -d -n claude -c ROOT : neptuno-claude; docker compose exec api claude; " +
-			`status=$?; if [ $status -ne 0 ]; then echo; echo "claude exited with status $status. Press enter to close this window."; read _; fi`,
-		"tmux -S /tmp/om select-window -t :claude",
-		"tmux select-window -t =neptuno-acme:api",
-		"attach: tmux attach-session -t =neptuno-acme",
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("commands:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
-	}
-	if !ClosesOnExit(strings.TrimPrefix(want[0], "tmux -S /tmp/om new-window -d -n claude -c ROOT ")) {
-		t.Error("the pane-died hook would turn Claude's tab into a shell")
-	}
-
-	f.cmds = nil
-	f.overmindWindows = "web\nworker\nclaude\n"
-	if err := o.Claude(ClaudeOptions{Repo: "api", Detach: true}); err != nil {
-		t.Fatal(err)
-	}
-	if len(f.cmds) != 1 || f.cmds[0] != "tmux -S /tmp/om select-window -t :claude" {
-		t.Errorf("with the tab open, ran:\n%s", strings.Join(f.cmds, "\n"))
-	}
-}
-
 func TestOpenDashboardCreatesSessionAndAttaches(t *testing.T) {
 	t.Setenv("TMUX", "")
 	o, f := setup(t)
@@ -669,7 +553,7 @@ func TestOpenDashboardReopensClosedDashboardInsideTmux(t *testing.T) {
 // claudeSplit is the command that opens Claude Code below the dashboard.
 func claudeSplit(root string) string {
 	return "tmux split-window -v -d -l 50% -t =neptuno-acme:neptuno -c " + root +
-		` claude; status=$?; if [ $status -ne 0 ]; then echo; echo "claude exited with status $status. Press enter to close this pane."; read _; fi`
+		" " + claudeCommand(nil)
 }
 
 func TestOpenDashboardWithoutClaudeSkipsTheSplit(t *testing.T) {

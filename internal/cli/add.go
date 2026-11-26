@@ -56,7 +56,19 @@ func newAddCommand() *cobra.Command {
 				Runner:  orchestrate.ExecRunner{Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr()},
 				Log:     cmd.OutOrStdout(),
 			}
-			return a.Add(opts)
+			if err := a.Add(opts); err != nil {
+				return err
+			}
+			// Give the new repo its Claude Code subagent.
+			o, err := loadOrchestrator(cmd)
+			if err != nil {
+				return err
+			}
+			o.Log = cmd.OutOrStdout()
+			if _, err := o.SyncMCP(); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not write the MCP configs or the repo's subagent: %v\n", err)
+			}
+			return nil
 		},
 	}
 	cmd.Flags().StringVarP(&opts.Stack, "stack", "s", "", "stack template to use (default \""+stacks.Default+"\")")
