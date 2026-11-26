@@ -39,12 +39,12 @@ type Command struct {
 // first, with everything it depends on, as neptuno up --detach does.
 func (o *Orchestrator) ExecCommand(opts ExecOptions) (Command, error) {
 	p, name := o.Project, opts.Service
-	if len(opts.Args) == 0 {
-		return Command{}, errors.New("name a command to run, such as: neptuno exec " + name + " -- bin/rails test")
-	}
 	_, isService := p.Services[name]
 	if !p.IsRepo(name) && !isService {
 		return Command{}, fmt.Errorf("unknown repo or service %q; neptuno status lists them", name)
+	}
+	if len(opts.Args) == 0 {
+		return Command{}, errors.New("name a command to run, such as: neptuno exec " + name + " -- bin/rails test")
 	}
 
 	if p.IsRepo(name) && p.RunMode(name) == project.RunHost {

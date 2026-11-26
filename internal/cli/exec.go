@@ -2,11 +2,15 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/mattn/go-isatty"
 	"github.com/robertoplancarte/neptuno/internal/orchestrate"
+	"github.com/robertoplancarte/neptuno/internal/procfile"
+	"github.com/robertoplancarte/neptuno/internal/project"
 	"github.com/spf13/cobra"
 )
 
@@ -38,26 +42,14 @@ func newExecCommand() *cobra.Command {
 			}
 			// What up prints goes to stderr, so stdout is the command's own.
 			o.Runner = orchestrate.ExecRunner{Out: cmd.ErrOrStderr(), Err: cmd.ErrOrStderr()}
-			var service string
-			if cmd.ArgsLenAtDash() == 0 {
-				if service = serviceFromFolder(cmd, o.Project); service == "" {
-					return errors.New("name a repo before --, or run this inside one of its folders")
-				}
-			} else {
-				service, args = args[0], args[1:]
-				// Flag parsing stops at the repo, so the -- after it is
-				// still among the arguments.
-				if len(args) > 0 && args[0] == "--" {
-					args = args[1:]
-				}
-			}
 			wd, _ := os.Getwd()
-			c, err := o.ExecCommand(orchestrate.ExecOptions{
-				Service: service,
-				Args:    args,
-				Dir:     wd,
-				TTY:     isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd()),
-			})
+			opts, err := execOptions(cmd, o.Project, args, cmd.ArgsLenAtDash())
+			if err != nil {
+				return err
+			}
+			opts.Dir = wd
+			opts.TTY = isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
+			c, err := execCommand(o, opts)
 			if err != nil {
 				return err
 			}
@@ -74,4 +66,44 @@ func newExecCommand() *cobra.Command {
 	// Flags after the repo belong to the command, as in neptuno exec api ls -la.
 	cmd.Flags().SetInterspersed(false)
 	return cmd
+}
+
+// execCommand builds the command to run; tests replace it.
+var execCommand = (*orchestrate.Orchestrator).ExecCommand
+
+// execOptions splits neptuno exec's arguments into the repo or service and
+// the command. dashAt is cobra's ArgsLenAtDash: 0 when the arguments start
+// with --, so the repo comes from the current folder. Flag parsing stops at
+// the repo, so a -- after it is still among args; only that one separator
+// is dropped, and any later -- belongs to the command.
+func execOptions(cmd *cobra.Command, p *project.Project, args []string, dashAt int) (orchestrate.ExecOptions, error) {
+	if dashAt == 0 {
+		service := serviceFromFolder(cmd, p)
+		if service == "" {
+			return orchestrate.ExecOptions{}, errors.New("name a repo before --, or run this inside one of its folders")
+		}
+		return orchestrate.ExecOptions{Service: service, Args: args}, nil
+	}
+	service, command := args[0], args[1:]
+	if len(command) > 0 && command[0] == "--" {
+		command = command[1:]
+	}
+	if _, ok := p.Services[service]; !ok && !p.IsRepo(service) {
+		msg := fmt.Sprintf("no repo or service named %q; neptuno status lists them", service)
+		wd, _ := os.Getwd()
+		if here := p.ServiceAt(wd); here != "" {
+			msg += fmt.Sprintf(". To run it in %s, put -- first: neptuno exec -- %s", here, shellJoin(args))
+		}
+		return orchestrate.ExecOptions{}, errors.New(msg)
+	}
+	return orchestrate.ExecOptions{Service: service, Args: command}, nil
+}
+
+// shellJoin quotes args for a command line shown to the user.
+func shellJoin(args []string) string {
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = procfile.Quote(a)
+	}
+	return strings.Join(quoted, " ")
 }
