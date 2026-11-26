@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -238,5 +239,48 @@ func TestAddWildcardOnExistingRepo(t *testing.T) {
 	}
 	if read(t, filepath.Join(root, "compose.yml")) != compose {
 		t.Error("compose.yml changed on rerun")
+	}
+}
+
+func TestAddWithPlaywrightAddsTheService(t *testing.T) {
+	a, f := newAdder(t)
+	root := a.Project.Root
+	if err := a.Add(Options{Name: "shop", Stack: "rails", With: []string{"playwright"}}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := project.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := p.Services["playwright"]; !ok {
+		t.Fatal("compose.yml has no playwright service")
+	}
+	if deps := p.Services["shop"].DependsOn; !slices.Contains(deps, "playwright") {
+		t.Errorf("shop depends_on = %v, want playwright", deps)
+	}
+	if got := read(t, filepath.Join(root, "Caddyfile")); !strings.Contains(got, "http://playwright.localhost") {
+		t.Errorf("Caddyfile:\n%s", got)
+	}
+	if got := read(t, filepath.Join(root, "environments/shop/base.env")); !strings.Contains(got, "SYSTEM_TESTS_HOST=shop") {
+		t.Errorf("base.env:\n%s", got)
+	}
+	generate := strings.Join(f.cmds, "\n")
+	for _, want := range []string{
+		"bundle add playwright-ruby-client --version '~> " + scaffold.PlaywrightMinor + "' --group test",
+		"bundle add capybara-playwright-driver --group test",
+		`browser_server_endpoint_url: ENV.fetch("PLAYWRIGHT_SERVER_URL")`,
+	} {
+		if !strings.Contains(generate, want) {
+			t.Errorf("generator lacks %q:\n%s", want, generate)
+		}
+	}
+
+	// A repo without the option leaves an opt-in service out.
+	a2, _ := newAdder(t)
+	if err := a2.Add(Options{Name: "shop", Stack: "rails"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(read(t, filepath.Join(a2.Project.Root, "compose.yml")), "playwright") {
+		t.Error("playwright added without the option")
 	}
 }

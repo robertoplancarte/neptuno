@@ -3,10 +3,10 @@ package cli
 import (
 	"bytes"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
-	"github.com/robertoplancarte/neptuno/internal/scaffold"
 	"github.com/robertoplancarte/neptuno/internal/tui"
 )
 
@@ -167,8 +167,11 @@ func TestInitMenu(t *testing.T) {
 	pickServices = func(opts tui.ChecklistOptions) ([]string, error) {
 		offered = append(offered, opts.Names)
 		if len(offered) == 1 {
-			if len(opts.Preselected) != len(scaffold.DefaultServices) {
-				t.Errorf("new project preselects %v, want every default", opts.Preselected)
+			if strings.Join(opts.Preselected, ",") != "postgres,valkey,s3,mailpit,hook0" {
+				t.Errorf("new project preselects %v, want every default but the opt-in playwright", opts.Preselected)
+			}
+			if !slices.Contains(opts.Names, "playwright") {
+				t.Errorf("new project menu %v does not offer playwright", opts.Names)
 			}
 			return []string{"postgres"}, nil
 		}
@@ -183,7 +186,7 @@ func TestInitMenu(t *testing.T) {
 	if _, err := createAndAdd(t, root); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(offered[1], ",") != "valkey,s3,mailpit,hook0" {
+	if strings.Join(offered[1], ",") != "valkey,s3,mailpit,hook0,playwright" {
 		t.Errorf("second menu offered %v, want the missing services", offered[1])
 	}
 	if got := readFile(t, "acme/compose.yml"); !strings.Contains(got, "hook0:") || strings.Contains(got, "seaweedfs") {

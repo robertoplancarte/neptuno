@@ -45,6 +45,11 @@ func newExecCommand() *cobra.Command {
 				}
 			} else {
 				service, args = args[0], args[1:]
+				// Flag parsing stops at the repo, so the -- after it is
+				// still among the arguments.
+				if len(args) > 0 && args[0] == "--" {
+					args = args[1:]
+				}
 			}
 			wd, _ := os.Getwd()
 			c, err := o.ExecCommand(orchestrate.ExecOptions{

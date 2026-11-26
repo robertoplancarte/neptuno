@@ -110,3 +110,27 @@ func TestWriteProjectWithNothingDeclared(t *testing.T) {
 		t.Error("created .mcp.json with no servers")
 	}
 }
+
+func TestServersIncludePlaywright(t *testing.T) {
+	p := &project.Project{Services: map[string]project.Service{"playwright": {Name: "playwright"}}}
+	sites := proxy.Parse("http://playwright.localhost {\n\treverse_proxy playwright:8931\n}\n")
+	got, warnings := Servers(p, sites, nil)
+	want := []Server{{Repo: "playwright", Name: "playwright", Path: "/mcp", HostURL: "http://playwright.localhost/mcp", ContainerURL: "http://playwright:8931/mcp"}}
+	if !reflect.DeepEqual(got, want) || len(warnings) > 0 {
+		t.Errorf("Servers = %+v, %q\nwant %+v", got, warnings, want)
+	}
+	if got[0].ID() != "playwright" {
+		t.Errorf("ID = %s", got[0].ID())
+	}
+
+	// neptuno.yml can replace them.
+	p.Config.Repos = map[string]project.RepoConfig{"playwright": {MCP: map[string]string{"browser": "/other"}}}
+	if got, _ := Servers(p, sites, nil); len(got) != 1 || got[0].Path != "/other" {
+		t.Errorf("with neptuno.yml: %+v", got)
+	}
+
+	// Without the service there is no server.
+	if got, _ := Servers(&project.Project{}, sites, nil); len(got) != 0 {
+		t.Errorf("without the service: %+v", got)
+	}
+}

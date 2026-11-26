@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -70,5 +71,40 @@ func TestAddHook0WarnsAboutOldPostgres(t *testing.T) {
 	}
 	if got := strings.Join(log, "\n"); !strings.Contains(got, "hook0 needs PostgreSQL 18 or later, and compose.yml's postgres is postgres:17") {
 		t.Errorf("log = %s", got)
+	}
+}
+
+func TestPlaywrightIsOptIn(t *testing.T) {
+	if slices.Contains(DefaultServiceNames(), "playwright") || !slices.Contains(ServiceNames(), "playwright") || !IsOptIn("playwright") || IsOptIn("postgres") {
+		t.Fatalf("defaults %v, all %v", DefaultServiceNames(), ServiceNames())
+	}
+	dir := filepath.Join(t.TempDir(), "acme")
+	if _, err := Init(Options{Name: "acme", Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	if have, _ := ExistingServices(dir); slices.Contains(have, "playwright") {
+		t.Errorf("a new project got playwright without asking: %v", have)
+	}
+
+	if _, err := AddServices(dir, []string{"playwright"}); err != nil {
+		t.Fatal(err)
+	}
+	compose := read(t, filepath.Join(dir, "compose.yml"))
+	for _, want := range []string{
+		"image: mcr.microsoft.com/playwright:v" + PlaywrightVersion + "-noble",
+		"@playwright/mcp@" + PlaywrightMCPVersion,
+		"playwright@" + PlaywrightVersion + " run-server --host 0.0.0.0 --port 3000",
+		`net.connect(80, "proxy")`,
+		"\n  playwright:\n",
+	} {
+		if !strings.Contains(compose, want) {
+			t.Errorf("compose.yml lacks %q:\n%s", want, compose)
+		}
+	}
+	if got := read(t, filepath.Join(dir, "Caddyfile")); !strings.Contains(got, "http://playwright.localhost {\n\treverse_proxy playwright:8931\n}") {
+		t.Errorf("Caddyfile:\n%s", got)
+	}
+	if got := read(t, filepath.Join(dir, "environments/_shared/base.env")); !strings.Contains(got, "PLAYWRIGHT_SERVER_URL=ws://playwright:3000/") {
+		t.Errorf("base.env:\n%s", got)
 	}
 }

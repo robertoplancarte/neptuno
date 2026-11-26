@@ -38,6 +38,10 @@ type Service struct {
 	Site string
 	// Env holds the lines every repo gets in environments/_shared/base.env.
 	Env string
+	// OptIn services start unchecked in the init menu and are left out
+	// when init runs without --services. `neptuno add` adds one when a
+	// stack option it picks needs it.
+	OptIn bool
 }
 
 // Proxy is the Caddy reverse proxy, which every project gets: it is what
@@ -56,6 +60,14 @@ var Proxy = Service{
 `,
 	Volumes: []string{"caddy"},
 }
+
+// The Playwright the playwright service runs. Test clients must match its
+// minor version, as must the rails stack's playwright option.
+const (
+	PlaywrightVersion    = "1.65.1"
+	PlaywrightMinor      = "1.65.0"
+	PlaywrightMCPVersion = "0.0.86"
+)
 
 // DefaultServices are the shared services the init menu offers, in order.
 var DefaultServices = []Service{
@@ -222,15 +234,82 @@ HOOK0_ORGANIZATION_ID=0e070000-0000-4000-8000-000000000001
 HOOK0_APPLICATION_ID=0e070000-0000-4000-8000-000000000002
 `,
 	},
+	{
+		Name:        "playwright",
+		Title:       "Playwright",
+		Description: "Playwright browsers for every repo's browser tests, and a browser Claude can drive over MCP",
+		Address:     "playwright:3000",
+		Hosts:       []string{"http://playwright.localhost/mcp"},
+		OptIn:       true,
+		Compose: `# Playwright runs the browsers every repo shares, so no repo's image needs
+# its own. Tests connect to its server at ws://playwright:3000/ (repos get
+# PLAYWRIGHT_SERVER_URL), and Claude Code drives a browser through its MCP
+# server at http://playwright.localhost/mcp. Inside it, *.localhost reaches
+# the proxy, so its browsers open http://<repo>.localhost as yours do. A
+# test client must match the server's Playwright version, such as
+# playwright-ruby-client ~> ` + PlaywrightMinor + ` for this image.
+playwright:
+  image: mcr.microsoft.com/playwright:v` + PlaywrightVersion + `-noble
+  init: true
+  ipc: host
+  command:
+    - bash
+    - -c
+    - |
+      # Browsers take every *.localhost name to this container's loopback,
+      # so port 80 there is passed on to the proxy.
+      node -e '
+        const net = require("net");
+        for (const host of ["127.0.0.1", "::1"]) {
+          net.createServer((c) => {
+            const p = net.connect(80, "proxy");
+            c.pipe(p).pipe(c);
+            c.on("error", () => p.destroy());
+            p.on("error", () => c.destroy());
+          }).on("error", () => {}).listen(80, host);
+        }' &
+      chrome=$$(ls -d /ms-playwright/chromium-*/chrome-linux*/chrome | head -n 1)
+      npx -y @playwright/mcp@` + PlaywrightMCPVersion + ` --headless --no-sandbox --isolated --executable-path "$$chrome" --host 0.0.0.0 --port 8931 --allowed-hosts '*' &
+      npx -y playwright@` + PlaywrightVersion + ` run-server --host 0.0.0.0 --port 3000 &
+      # Stop, so the container shows as exited, when any of them does.
+      wait -n
+  volumes: ["playwright:/root/.npm"]
+  depends_on: [proxy]
+`,
+		Volumes: []string{"playwright"},
+		Site:    "http://playwright.localhost {\n\treverse_proxy playwright:8931\n}",
+		Env: `# Playwright's browser server; a test client must match its version.
+PLAYWRIGHT_SERVER_URL=ws://playwright:3000/
+`,
+	},
 }
 
-// DefaultServiceNames returns the names of DefaultServices, in order.
-func DefaultServiceNames() []string {
+// ServiceNames returns the names of every service init can set up, in
+// menu order.
+func ServiceNames() []string {
 	names := make([]string, len(DefaultServices))
 	for i, s := range DefaultServices {
 		names[i] = s.Name
 	}
 	return names
+}
+
+// DefaultServiceNames returns the services a new project gets unless told
+// otherwise: all of DefaultServices but the opt-in ones, in order.
+func DefaultServiceNames() []string {
+	var names []string
+	for _, s := range DefaultServices {
+		if !s.OptIn {
+			names = append(names, s.Name)
+		}
+	}
+	return names
+}
+
+// IsOptIn reports whether name is one of the opt-in services.
+func IsOptIn(name string) bool {
+	s, ok := lookupService(name)
+	return ok && s.OptIn
 }
 
 // ErrUnknownService is returned for a name that isn't in DefaultServices.
@@ -247,7 +326,7 @@ func ResolveServices(names []string) (chosen []Service, required []string, err e
 			continue
 		}
 		if _, ok := lookupService(n); !ok {
-			return nil, nil, fmt.Errorf("%q: %w (choose from %s)", n, ErrUnknownService, strings.Join(DefaultServiceNames(), ", "))
+			return nil, nil, fmt.Errorf("%q: %w (choose from %s)", n, ErrUnknownService, strings.Join(ServiceNames(), ", "))
 		}
 		want[n] = true
 	}

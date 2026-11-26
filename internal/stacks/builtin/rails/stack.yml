@@ -47,3 +47,37 @@ options:
       bundle add aws-sdk-s3 --require=false &&
       printf '%s\n' '' 'seaweedfs:' '  service: S3' '  endpoint: <%= ENV["AWS_ENDPOINT"] %>' '  access_key_id: <%= ENV["AWS_ACCESS_KEY_ID"] %>' '  secret_access_key: <%= ENV["AWS_SECRET_ACCESS_KEY"] %>' '  region: us-east-1' '  bucket: <%= ENV["S3_BUCKET"] %>' '  force_path_style: true' >> config/storage.yml &&
       sed -i 's/config.active_storage.service = :local/config.active_storage.service = :seaweedfs/' config/environments/development.rb
+  playwright:
+    description: System tests drive the project's shared Playwright browsers (capybara-playwright-driver)
+    services: [playwright]
+    # The browsers run in the playwright container and reach the app under
+    # test by the repo's compose name.
+    env: ["SYSTEM_TESTS_HOST={{.Name}}"]
+    # playwright-ruby-client must match the minor version of Playwright the
+    # playwright service runs.
+    after_generate: |-
+      bundle add playwright-ruby-client --version '~> 1.65.0' --group test &&
+      bundle add capybara-playwright-driver --group test &&
+      mkdir -p test && cat > test/application_system_test_case.rb <<'RUBY'
+      require "test_helper"
+      require "capybara/playwright"
+
+      # System tests drive Chromium in the project's shared playwright
+      # container, through its server at PLAYWRIGHT_SERVER_URL. The app under
+      # test listens on every interface of this container, and the browser
+      # reaches it by the repo's compose name, SYSTEM_TESTS_HOST.
+      Capybara.register_driver(:playwright_server) do |app|
+        Capybara::Playwright::Driver.new(app,
+          browser_server_endpoint_url: ENV.fetch("PLAYWRIGHT_SERVER_URL"),
+          browser_type: :chromium,
+          headless: true)
+      end
+      Capybara.server_host = "0.0.0.0"
+      Capybara.app_host = "http://#{ENV.fetch("SYSTEM_TESTS_HOST") { Socket.gethostname }}"
+      Capybara.always_include_port = true
+
+      class ApplicationSystemTestCase < ActionDispatch::SystemTestCase
+        driven_by :playwright_server
+      end
+      RUBY
+      test -s test/application_system_test_case.rb

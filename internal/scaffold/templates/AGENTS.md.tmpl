@@ -89,6 +89,12 @@ the one a repo's app uses to call another repo's server from its container
 Neptuno's own tools (status, up, down, exec, logs, handing a task to a
 repo's subagent) and every repo's MCP tools.
 
+When `compose.yml` has the opt-in `playwright` service, `.mcp.json` also
+gets its `playwright` server: a headless Chromium in that container, which
+opens `http://<repo>.localhost` just as a browser on this machine does. Use
+it to click through a change and check it works. After a navigation, call
+its snapshot tool to read the page.
+
 ## Skills
 
 `.claude/skills/` holds step-by-step guides for common jobs here: adding a
