@@ -30,6 +30,10 @@ type DashboardOptions struct {
 	Status func() []orchestrate.ServiceStatus
 	// Refresh is how often Status runs. Zero means every two seconds.
 	Refresh time.Duration
+	// ProbeMCP asks the next Status to probe every MCP server again, rather
+	// than show what a recent probe found: the dashboard calls it when the
+	// user refreshes and when an action ends. Nil does nothing.
+	ProbeMCP func()
 	// Vars resolves a repo's env, for the Env tab.
 	Vars func(repo string) ([]env.Var, error)
 	// Logs returns a service's recent container output, for the Logs tab:
@@ -199,6 +203,13 @@ func (m *dashboard) anyBusy() bool {
 	return false
 }
 
+// probeMCP has the next refresh probe the MCP servers again.
+func (m *dashboard) probeMCP() {
+	if m.opts.ProbeMCP != nil {
+		m.opts.ProbeMCP()
+	}
+}
+
 func (m *dashboard) tick() tea.Cmd {
 	return tea.Tick(m.opts.Refresh, func(time.Time) tea.Msg { return tickMsg{} })
 }
@@ -261,6 +272,7 @@ func (m *dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.message = msg.action + " done"
 		}
+		m.probeMCP()
 		return m, m.refresh()
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -404,6 +416,7 @@ func (m *dashboard) dispatch(key string) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "f":
+		m.probeMCP()
 		return m, m.refresh()
 	case "n":
 		m.openAddForm()

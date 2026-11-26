@@ -11,6 +11,7 @@ import (
 
 	"github.com/mattn/go-isatty"
 	"github.com/robertoplancarte/neptuno/internal/env"
+	"github.com/robertoplancarte/neptuno/internal/mcp"
 	"github.com/robertoplancarte/neptuno/internal/orchestrate"
 	"github.com/robertoplancarte/neptuno/internal/project"
 	"github.com/robertoplancarte/neptuno/internal/stacks"
@@ -70,14 +71,21 @@ func isTerminal() bool {
 	return isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd())
 }
 
+// mcpProbeAge is how long the dashboard shows an MCP server's last probe
+// before probing it again, unless its service changes state first.
+const mcpProbeAge = 30 * time.Second
+
 func dashboardHere(o *orchestrate.Orchestrator) error {
+	prober := mcp.NewProber(mcpProbeAge, 800*time.Millisecond)
 	live := newLiveOrchestrator(o)
+	live.base.MCPProber = prober
 	return tui.RunDashboard(tui.DashboardOptions{
 		Project:       o.Project.Name,
 		Root:          o.Project.Root,
 		Session:       o.SessionName(),
 		Neptuno:       o.Neptuno,
 		Status:        func() []orchestrate.ServiceStatus { return live.get().Status() },
+		ProbeMCP:      prober.Forget,
 		Vars:          func(repo string) ([]env.Var, error) { return live.get().EnvVars(repo) },
 		Logs:          func(name string, since time.Time) (string, error) { return live.get().Logs(name, since) },
 		MCP:           func() orchestrate.MCPSummary { return live.get().MCPSummary() },

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/robertoplancarte/neptuno/internal/env"
+	"github.com/robertoplancarte/neptuno/internal/mcp"
 	"github.com/robertoplancarte/neptuno/internal/procfile"
 	"github.com/robertoplancarte/neptuno/internal/procs"
 	"github.com/robertoplancarte/neptuno/internal/project"
@@ -26,6 +27,10 @@ type Orchestrator struct {
 	// Neptuno is the path of the neptuno binary, used by host-mode
 	// Procfiles.
 	Neptuno string
+	// MCPProber, when set, is how Status checks the MCP servers: it
+	// remembers answers, for a dashboard that asks every few seconds. Nil
+	// probes every server on every call, as `neptuno status` does once.
+	MCPProber *mcp.Prober
 }
 
 // UpOptions configures Up.

@@ -201,6 +201,8 @@ func (m *dashboard) handleAction(msg actionMsg) tea.Cmd {
 	} else {
 		m.message = name + " done"
 	}
+	// A service just started or restarted: look at its MCP servers again.
+	m.probeMCP()
 	// Look inside a cleared volume again, or show a new repo's Logs.
 	if _, ok := m.currentVolume(); ok || added {
 		m.panel = panelMsg{}

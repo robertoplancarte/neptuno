@@ -171,22 +171,35 @@ func (o *Orchestrator) Status() []ServiceStatus {
 		}
 		out = append(out, s)
 	}
-	probeMCP(out)
+	o.probeMCP(out)
 	return out
 }
 
-// probeMCP checks the MCP servers of every running service, all at once.
-func probeMCP(rows []ServiceStatus) {
+// mcpProbeTimeout bounds a round of MCP probes.
+const mcpProbeTimeout = 800 * time.Millisecond
+
+// probeMCP checks the MCP servers of every running service, all at once,
+// through the orchestrator's MCPProber when it has one.
+func (o *Orchestrator) probeMCP(rows []ServiceStatus) {
 	var servers []mcp.Server
+	states := map[string]string{}
 	for _, r := range rows {
 		if r.Running() {
 			servers = append(servers, r.MCP...)
+			for _, s := range r.MCP {
+				states[s.ID()] = r.probeState()
+			}
 		}
 	}
 	if len(servers) == 0 {
 		return
 	}
-	health := mcp.ProbeAll(servers, 800*time.Millisecond)
+	var health map[string]mcp.Health
+	if o.MCPProber != nil {
+		health = o.MCPProber.Check(servers, states)
+	} else {
+		health = mcp.ProbeAll(servers, mcpProbeTimeout)
+	}
 	for i, r := range rows {
 		for _, srv := range r.MCP {
 			if h, ok := health[srv.ID()]; ok {
@@ -197,6 +210,17 @@ func probeMCP(rows []ServiceStatus) {
 			}
 		}
 	}
+}
+
+// probeState sums up what a service is doing for its MCP servers' probes:
+// when it changes, as when the service starts, restarts or crashes, they
+// are probed again.
+func (s ServiceStatus) probeState() string {
+	parts := []string{s.State(), s.Container, s.Health}
+	for _, p := range s.Processes {
+		parts = append(parts, p.Name+"="+p.Status)
+	}
+	return strings.Join(parts, " ")
 }
 
 // proxyService is the compose service that runs Caddy, as `neptuno init`

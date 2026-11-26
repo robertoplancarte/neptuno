@@ -1,8 +1,11 @@
 package tui
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -408,5 +411,66 @@ func TestDashboardShowsProgress(t *testing.T) {
 	}
 	if got := ansi.Strip(RenderStatus([]orchestrate.ServiceStatus{{Name: "web", Repo: true, Progress: &orchestrate.Progress{Phase: orchestrate.PhasePulling}}})); !strings.Contains(got, "◌ pulling") {
 		t.Errorf("status = %s", got)
+	}
+}
+
+// TestDashboardProbesMCPSparingly runs the dashboard's refresh loop with a
+// real prober and checks the MCP server is probed once, not on every tick,
+// and again when the user refreshes.
+func TestDashboardProbesMCPSparingly(t *testing.T) {
+	var posts atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			posts.Add(1)
+		}
+	}))
+	defer ts.Close()
+
+	clock := time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)
+	prober := mcp.NewProber(30*time.Second, 2*time.Second)
+	prober.Now = func() time.Time { return clock }
+	status := func() []orchestrate.ServiceStatus {
+		rows := dashboardRows()
+		rows[0].MCP = []mcp.Server{{Repo: "api", Name: "hyperdrive", HostURL: ts.URL + "/_hyperdrive/mcp"}}
+		rows[0].MCPHealth = prober.Check(rows[0].MCP, map[string]string{"api-hyperdrive": rows[0].State()})
+		return rows
+	}
+	m := newDashboard(DashboardOptions{Project: "acme", Status: status, ProbeMCP: prober.Forget, Refresh: time.Millisecond})
+	// run delivers the status a command loads, as bubbletea would, and
+	// drops the rest.
+	var run func(tea.Cmd)
+	run = func(cmd tea.Cmd) {
+		if cmd == nil {
+			return
+		}
+		switch msg := cmd().(type) {
+		case tea.BatchMsg:
+			for _, c := range msg {
+				run(c)
+			}
+		case statusMsg:
+			m.Update(msg)
+		}
+	}
+
+	run(m.Init())
+	if n := posts.Load(); n != 1 {
+		t.Fatalf("first refresh probed %d times, want 1", n)
+	}
+	// A minute of two-second ticks, short of the probe's 30 seconds.
+	for i := 0; i < 14; i++ {
+		clock = clock.Add(2 * time.Second)
+		_, cmd := m.Update(tickMsg{})
+		run(cmd)
+	}
+	if !m.loaded || m.rows[0].MCPHealth["api-hyperdrive"] != mcp.Up {
+		t.Errorf("health = %v", m.rows[0].MCPHealth)
+	}
+	if n := posts.Load(); n != 1 {
+		t.Errorf("14 ticks probed %d times, want 1", n)
+	}
+	run(key(m, "f"))
+	if n := posts.Load(); n != 2 {
+		t.Errorf("after f, probed %d times, want 2", n)
 	}
 }
