@@ -44,6 +44,20 @@ func (r ExecRunner) Run(dir, name string, args ...string) error {
 	return nil
 }
 
+// Stream is Run that also copies the command's output to w. The command's
+// output is then not a terminal, so docker compose prints it plainly.
+func (r ExecRunner) Stream(w io.Writer, dir, name string, args ...string) error {
+	if r.Verbose {
+		fmt.Fprintf(r.Err, "$ %s %s\n", name, strings.Join(args, " "))
+	}
+	cmd := exec.Command(name, args...)
+	cmd.Dir, cmd.Stdout, cmd.Stderr = dir, io.MultiWriter(r.Out, w), io.MultiWriter(r.Err, w)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+	}
+	return nil
+}
+
 func (r ExecRunner) Check(dir, name string, args ...string) bool {
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
