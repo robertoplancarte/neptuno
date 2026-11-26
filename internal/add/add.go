@@ -137,7 +137,11 @@ func (a *Adder) Add(opts Options) error {
 	if err != nil {
 		return err
 	}
-	if err := a.addComposeService(name, stack.ServicesFor(data), volumes); err != nil {
+	services := stack.ServicesFor(data)
+	if err := a.addOptInServices(services); err != nil {
+		return err
+	}
+	if err := a.addComposeService(name, services, volumes); err != nil {
 		return err
 	}
 	if err := a.addCaddySite(name, data.Port, opts.Wildcard); err != nil {
@@ -248,6 +252,38 @@ func (a *Adder) addComposeService(name string, services, volumes []string) error
 		return err
 	}
 	fmt.Fprintf(a.Log, "  added   compose.yml service %s\n", name)
+	return nil
+}
+
+// addOptInServices adds the opt-in shared services, such as playwright,
+// that the repo needs and compose.yml lacks, as `neptuno init --services`
+// would: a chosen stack option asking for one is the opt-in.
+func (a *Adder) addOptInServices(services []string) error {
+	if _, err := os.Stat(a.Project.Path("compose.yml")); err != nil {
+		return nil // no compose.yml to add them to
+	}
+	var missing []string
+	for _, s := range services {
+		if _, ok := a.Project.Services[s]; !ok && scaffold.IsOptIn(s) {
+			missing = append(missing, s)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	log, err := scaffold.AddServices(a.Project.Root, missing)
+	for _, l := range log {
+		fmt.Fprintf(a.Log, "  %s\n", l)
+	}
+	if err != nil {
+		return err
+	}
+	p, err := project.Load(a.Project.Root)
+	if err != nil {
+		return err
+	}
+	a.Project = p
+	a.reloadCaddy()
 	return nil
 }
 

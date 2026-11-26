@@ -217,7 +217,7 @@ func TestRailsOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(s.OptionNames(), ","); got != "action_text,mailpit,storage_s3,tailwind" {
+	if got := strings.Join(s.OptionNames(), ","); got != "action_text,mailpit,playwright,storage_s3,tailwind" {
 		t.Errorf("options = %s", got)
 	}
 
@@ -258,7 +258,7 @@ func TestRailsOptions(t *testing.T) {
 		t.Errorf("Procfile has tailwind although it is off:\n%s", proc)
 	}
 
-	if _, err := s.Select(Data{}, []string{"sidekiq"}, nil); err == nil || !strings.Contains(err.Error(), "options: action_text, mailpit, storage_s3, tailwind") {
+	if _, err := s.Select(Data{}, []string{"sidekiq"}, nil); err == nil || !strings.Contains(err.Error(), "options: action_text, mailpit, playwright, storage_s3, tailwind") {
 		t.Errorf("unknown option error = %v", err)
 	}
 }
@@ -272,7 +272,7 @@ func TestOptionsMergeThroughExtends(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(s.OptionNames(), ","); got != "action_text,mailpit,sidekiq,storage_s3,tailwind" {
+	if got := strings.Join(s.OptionNames(), ","); got != "action_text,mailpit,playwright,sidekiq,storage_s3,tailwind" {
 		t.Errorf("options = %s", got)
 	}
 	data, _ := s.Select(Data{Name: "shop"}, []string{"sidekiq"}, nil)
@@ -294,7 +294,7 @@ func TestOptionsMergeThroughExtends(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(c.OptionNames(), ","); got != "action_text,mailpit,sidekiq,storage_s3,tailwind" {
+	if got := strings.Join(c.OptionNames(), ","); got != "action_text,mailpit,playwright,sidekiq,storage_s3,tailwind" {
 		t.Errorf("copied options = %s", got)
 	}
 }

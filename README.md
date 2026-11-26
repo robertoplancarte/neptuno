@@ -22,8 +22,9 @@ cd acme
 docker compose up -d   # Caddy, PostgreSQL 18, Valkey 8, SeaweedFS, Mailpit, Hook0
 ```
 
-In a terminal, `neptuno init` first shows a checklist of the default shared
-services, all checked: uncheck the ones the project doesn't need. Services a
+In a terminal, `neptuno init` first shows a checklist of the shared
+services, all checked but the opt-in Playwright: uncheck the ones the project
+doesn't need. Services a
 chosen one needs come along (Hook0 brings PostgreSQL and Mailpit). Scripts pass
 `--services` to skip the checklist:
 
@@ -66,6 +67,7 @@ acme/
 | Object storage | `chrislusf/seaweedfs` | `localhost:8333`, `s3.localhost` |
 | Mail catcher | `axllent/mailpit:v1` | SMTP `localhost:1025`, inbox `localhost:8025`, `mailpit.localhost` |
 | Webhooks | `hook0/hook0-api`, `hook0/hook0-output-worker`, `hook0/hook0-frontend` | API `localhost:8081`, dashboard `hook0.localhost` |
+| Browsers (opt-in) | `mcr.microsoft.com/playwright` | tests `ws://playwright:3000/`, MCP `playwright.localhost/mcp` |
 
 [Hook0](https://www.hook0.com) keeps its tables in their own schemas of the
 shared `postgres` database, which is why that service is PostgreSQL 18: Hook0
@@ -153,6 +155,7 @@ them with `--with` and `--without`). The `rails` stack has:
 | `mailpit` | on | Action Mailer in development delivers over SMTP to the project's Mailpit (`SMTP_HOST`, `SMTP_PORT`), so mail shows at `http://mailpit.localhost`; mail links point at `http://<name>.localhost` |
 | `action_text` | off | runs `bin/rails action_text:install` |
 | `storage_s3` | off | stores Active Storage uploads in the project's SeaweedFS: adds `aws-sdk-s3`, a `seaweedfs` service in `config/storage.yml`, the S3 env vars, and creates the bucket at container start |
+| `playwright` | off | system tests drive the project's shared Playwright browsers: adds `capybara-playwright-driver` and a `test/application_system_test_case.rb` that connects to them, and adds the `playwright` service if the project lacks it (see [Browser testing with Playwright](#browser-testing-with-playwright)) |
 
 ```sh
 neptuno add shop --stack rails --with action_text,storage_s3 --without tailwind
@@ -194,6 +197,49 @@ Its options, Dockerfile, entrypoint.sh, Procfile and base.env still come from
 the built-in stack. To start from a full copy instead, run `neptuno stacks copy
 rails` (or `neptuno stacks copy rails rails-rspec` for a new stack next to the
 original).
+
+### Browser testing with Playwright
+
+```sh
+neptuno add shop --stack rails --with playwright
+neptuno exec shop -- bin/rails test:system
+```
+
+Browsers are big, so instead of putting them in every repo's image Neptuno
+runs them once, in an opt-in `playwright` service on the
+`mcr.microsoft.com/playwright` image. `neptuno add` with the `playwright`
+option adds it to `compose.yml`, the `Caddyfile` and
+`environments/_shared/base.env` when the project lacks it, as
+`neptuno init --services playwright` does. The container runs two servers:
+
+- `playwright run-server` at `ws://playwright:3000/`, which test suites
+  connect to. Every repo gets `PLAYWRIGHT_SERVER_URL`. A client must match
+  its Playwright version (1.65), so the Rails option pins
+  `playwright-ruby-client` to `~> 1.65.0`; a Node repo would use
+  `playwright@1.65` and `chromium.connect(process.env.PLAYWRIGHT_SERVER_URL)`.
+- [Playwright MCP](https://github.com/microsoft/playwright-mcp) at
+  `http://playwright.localhost/mcp`, a headless Chromium that Claude Code
+  drives to click through a repo and check its own work. `neptuno up` and
+  `neptuno mcp sync` add it to `.mcp.json` as `playwright` whenever
+  `compose.yml` has the service, without anything in `neptuno.yml`.
+
+Inside the container every `*.localhost` name reaches the proxy: browsers
+send those names to the container's own loopback, and a small forwarder
+there passes port 80 on to Caddy with the `Host` header intact. So the MCP
+browser opens `http://shop.localhost` and `http://acme.shop.localhost` as
+yours do. Use URLs on port 80 there, even if you publish the proxy on
+another port.
+
+The Rails option writes `test/application_system_test_case.rb` so system
+tests use Chromium in that container. The test's Puma listens on every
+interface of the repo's container, and the browser reaches it by the repo's
+compose name, which the option puts in `SYSTEM_TESTS_HOST`. The repo
+`depends_on` the service, so `neptuno up shop` and `neptuno exec shop`
+start it too. Screenshots of
+failures land in `repos/<repo>/tmp/screenshots` as usual. For a Rails repo
+you already have, run `neptuno init --services playwright`, add the two
+gems to its test group, and copy that file from a new app made with the
+option.
 
 ## Starting services
 
@@ -490,6 +536,8 @@ repos:
 Claude Code runs on your machine in the project folder, so it reaches the
 server through Caddy, at `http://locke.localhost/_hyperdrive/mcp`, from
 `.mcp.json` in the project root; the repos' subagents get the same servers.
+The opt-in `playwright` service's browser is added the same way, with no
+declaration (see [Browser testing with Playwright](#browser-testing-with-playwright)).
 That covers Claude below the dashboard, in any terminal and in the Claude
 desktop app's Code tab. A repo's app that calls another repo's server from
 its container uses the compose address instead, `http://locke:3000/_hyperdrive/mcp`,

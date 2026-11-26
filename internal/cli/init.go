@@ -28,9 +28,10 @@ func newInitCommand() *cobra.Command {
 		Short: "Create a new environment, or add default services to this one",
 		Long: "Creates <name>/ with the environments, dockerfiles, procfiles and repos folders,\n" +
 			"a neptuno.yml, and a compose.yml and Caddyfile wired up with Caddy and the\n" +
-			"default services you choose: " + strings.Join(scaffold.DefaultServiceNames(), ", ") + ".\n" +
+			"shared services you choose: " + strings.Join(scaffold.ServiceNames(), ", ") + ".\n" +
 			"The new folder is a git repository so repos can be added as submodules.\n\n" +
-			"In a terminal, init shows a checklist of the default services, all checked.\n" +
+			"In a terminal, init shows a checklist of the services, all checked but\n" +
+			"playwright, which is opt-in.\n" +
 			"Pass --services to choose without it, as in scripts; services that a chosen\n" +
 			"one needs are added too.\n\n" +
 			"Run in an existing project, with no name or with the project's folder, init\n" +
@@ -63,7 +64,7 @@ func newInitCommand() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&noGit, "no-git", false, "do not run git init in the new folder")
 	cmd.Flags().StringSliceVar(&services, "services", nil,
-		"default services to set up, skipping the checklist: any of "+strings.Join(scaffold.DefaultServiceNames(), ", ")+
+		"services to set up, skipping the checklist: any of "+strings.Join(scaffold.ServiceNames(), ", ")+
 			" (--services= for none)")
 	return cmd
 }
@@ -95,7 +96,7 @@ func createProject(cmd *cobra.Command, name string, chosen []string, interactive
 		return err
 	}
 	if interactive {
-		picked, err := pickDefaultServices(fmt.Sprintf("Services for %s", name), scaffold.DefaultServiceNames(), scaffold.DefaultServiceNames(), nil, "create")
+		picked, err := pickDefaultServices(fmt.Sprintf("Services for %s", name), scaffold.ServiceNames(), scaffold.DefaultServiceNames(), nil, "create")
 		if err != nil {
 			return err
 		}
@@ -140,7 +141,7 @@ func addServices(cmd *cobra.Command, root string, chosen []string, interactive b
 		return err
 	}
 	var missing []string
-	for _, s := range scaffold.DefaultServiceNames() {
+	for _, s := range scaffold.ServiceNames() {
 		if !slices.Contains(have, s) {
 			missing = append(missing, s)
 		}

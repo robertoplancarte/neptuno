@@ -48,7 +48,18 @@ func (s Server) ID() string {
 	return s.Repo + "-" + s.Name
 }
 
-// Servers lists every MCP server declared in neptuno.yml, sorted by ID, with
+// ServiceServers are the MCP servers that shared services Neptuno sets up
+// serve, by compose service, as neptuno.yml would declare them. A project
+// whose compose.yml has the service gets them without declaring them, unless
+// neptuno.yml declares MCP servers for that service itself.
+var ServiceServers = map[string]map[string]string{
+	// The playwright service's browser, which Claude can drive to check
+	// the repos at http://<repo>.localhost.
+	"playwright": {"playwright": "/mcp"},
+}
+
+// Servers lists every MCP server declared in neptuno.yml, and those of the
+// shared services in ServiceServers, sorted by ID, with
 // the URLs it answers on. published maps the proxy container's ports to the
 // host ports they are published on, as for proxy.URLs. Problems, such as a
 // repo without a Caddyfile site, come back as warnings and leave that
@@ -56,8 +67,17 @@ func (s Server) ID() string {
 func Servers(p *project.Project, sites []proxy.Site, published map[int]int) ([]Server, []string) {
 	var out []Server
 	var warnings []string
+	declared := map[string]map[string]string{}
 	for name, cfg := range p.Config.Repos {
-		if len(cfg.MCP) == 0 {
+		declared[name] = cfg.MCP
+	}
+	for service, servers := range ServiceServers {
+		if _, ok := p.Services[service]; ok && declared[service] == nil {
+			declared[service] = servers
+		}
+	}
+	for name, mcps := range declared {
+		if len(mcps) == 0 {
 			continue
 		}
 		if _, ok := p.Services[name]; !ok && !p.IsRepo(name) {
@@ -69,7 +89,7 @@ func Servers(p *project.Project, sites []proxy.Site, published map[int]int) ([]S
 		if host == "" && container == "" {
 			warnings = append(warnings, fmt.Sprintf("the Caddyfile has no site for %s, so its MCP servers have no URL; add one with `neptuno add %s`", name, name))
 		}
-		for server, path := range cfg.MCP {
+		for server, path := range mcps {
 			if !strings.HasPrefix(path, "/") {
 				path = "/" + path
 			}
