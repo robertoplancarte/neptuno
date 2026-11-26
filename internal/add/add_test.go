@@ -101,6 +101,13 @@ func TestAddRunsGeneratorInContainer(t *testing.T) {
 		t.Errorf("second command = %q", f.cmds[1])
 	}
 	root := a.Project.Root
+	// rails new runs with --skip-git, which skips .gitignore, so it is
+	// written before the generator runs.
+	for _, path := range []string{"repos/shop/.gitignore", "repos/shop/.gitattributes"} {
+		if _, err := os.Stat(filepath.Join(root, path)); err != nil {
+			t.Errorf("%s not created", path)
+		}
+	}
 	if _, err := os.Stat(filepath.Join(root, ".neptuno/env/shop.env")); err != nil {
 		t.Error("env file not written before the generator ran")
 	}
