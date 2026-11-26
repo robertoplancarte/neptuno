@@ -353,3 +353,41 @@ func TestWarningsShowAndWrap(t *testing.T) {
 		t.Errorf("project panel: %q", lines)
 	}
 }
+
+func TestDashboardShowsProgress(t *testing.T) {
+	now := time.Date(2026, 10, 30, 14, 0, 0, 0, time.Local)
+	rows := dashboardRows()
+	rows[1].Container, rows[1].RunMode = "", "container"
+	rows[1].Progress = &orchestrate.Progress{Phase: orchestrate.PhaseBuilding, Step: 3, Steps: 7,
+		Detail: "RUN bundle install", Output: "Installing nokogiri 1.18", Since: now.Add(-72 * time.Second), Updated: now.Add(-40 * time.Second)}
+	rows[2].Container, rows[2].Health = "", ""
+	rows[2].Progress = &orchestrate.Progress{Phase: orchestrate.PhaseWaiting, Since: now, Updated: now}
+	m := newDashboard(DashboardOptions{Project: "acme", Status: func() []orchestrate.ServiceStatus { return rows }})
+	m.now = func() time.Time { return now }
+	_, cmd := m.Update(statusMsg(rows))
+	if cmd == nil || !m.spinning {
+		t.Error("no spinner tick while a row builds")
+	}
+	view := ansi.Strip(m.table())
+	for _, want := range []string{"building 3/7", "waiting"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("table missing %q:\n%s", want, view)
+		}
+	}
+	details := ansi.Strip(m.details(rows[1]))
+	for _, want := range []string{"building its image for 1m12s", "3 of 7 · RUN bundle install", "Installing nokogiri 1.18", "no output for 40s"} {
+		if !strings.Contains(details, want) {
+			t.Errorf("details missing %q:\n%s", want, details)
+		}
+	}
+
+	// Once nothing is busy the spinner stops.
+	rows[1].Progress, rows[2].Progress = nil, nil
+	m.Update(spinMsg{})
+	if m.spinning {
+		t.Error("spinner still ticking with nothing busy")
+	}
+	if got := ansi.Strip(RenderStatus([]orchestrate.ServiceStatus{{Name: "web", Repo: true, Progress: &orchestrate.Progress{Phase: orchestrate.PhasePulling}}})); !strings.Contains(got, "◌ pulling") {
+		t.Errorf("status = %s", got)
+	}
+}
