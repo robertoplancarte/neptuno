@@ -44,6 +44,56 @@ func TestBuiltinStacksRender(t *testing.T) {
 	}
 }
 
+// rails new --skip-git skips .gitignore and .gitattributes along with git
+// init, so a stack that passes it must ship them in app/ instead.
+func TestSkipGitStacksShipGitignore(t *testing.T) {
+	list, err := List("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := false
+	for _, s := range list {
+		if !strings.Contains(s.Generate, "--skip-git") {
+			continue
+		}
+		checked = true
+		files, err := s.AppFiles(Data{Name: "my-app", Project: "acme", Port: s.Port})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range []string{".gitignore", ".gitattributes"} {
+			if len(files[f]) == 0 {
+				t.Errorf("%s: rails new runs with --skip-git, but app/%s is missing", s.Name, f)
+			}
+		}
+	}
+	if !checked {
+		t.Fatal("no built-in stack runs rails new --skip-git; drop or update this test")
+	}
+}
+
+func TestRailsGitignore(t *testing.T) {
+	s, err := Get("", "rails")
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := s.AppFiles(Data{Name: "shop", Project: "acme", Port: 3000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ignore := string(files[".gitignore"])
+	for _, want := range []string{"/.bundle\n", "/.env*\n", "/log/*\n", "/tmp/*\n", "/storage/*\n", "/public/assets\n"} {
+		if !strings.Contains(ignore, want) {
+			t.Errorf(".gitignore does not ignore %q:\n%s", strings.TrimSpace(want), ignore)
+		}
+	}
+	// The block Rails' credentials generator looks for before appending its
+	// own, so config/master.key is ignored once, not twice.
+	if keys := "\n# Ignore key files for decrypting credentials and more.\n/config/*.key\n\n"; !strings.Contains(ignore, keys) {
+		t.Errorf(".gitignore does not ignore config/*.key the way Rails writes it:\n%s", ignore)
+	}
+}
+
 func TestAppFilesDropTmplSuffix(t *testing.T) {
 	s, err := Get("", "go")
 	if err != nil {
@@ -191,7 +241,7 @@ func TestCopy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(paths, ",") != "Dockerfile,Procfile,base.env,entrypoint.sh,stack.yml" {
+	if strings.Join(paths, ",") != "Dockerfile,Procfile,app/.gitattributes,app/.gitignore,base.env,entrypoint.sh,stack.yml" {
 		t.Errorf("copied %v", paths)
 	}
 	yml, _ := os.ReadFile(filepath.Join(target, "stack.yml"))

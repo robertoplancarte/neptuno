@@ -5,7 +5,8 @@ services: [postgres, valkey, s3]
 # and only change when Gemfile.lock does.
 volumes: ["{{.Name}}_bundle:/usr/local/bundle"]
 # The marker tells entrypoint.sh this is a new app; rails new goes last, as
-# options append their flags to it.
+# options append their flags to it. --skip-git leaves git init to Neptuno, but
+# it also skips .gitignore and .gitattributes, so those come from app/.
 generate: >-
   mkdir -p tmp && touch tmp/neptuno-new-app &&
   gem install rails -v '~> 8.1' --no-document &&
