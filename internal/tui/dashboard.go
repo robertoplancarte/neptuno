@@ -121,6 +121,9 @@ type dashboard struct {
 	// actionCursor.
 	actionsFocus bool
 	actionCursor int
+	// onAddRepo says the cursor is on the empty Repos list, whose one line
+	// adds a repo, rather than on m.cursor's row.
+	onAddRepo bool
 	// spinning is true while a spinner tick is on its way, which keeps the
 	// busy rows' spinners turning between refreshes.
 	spinning bool
@@ -220,6 +223,13 @@ func (m *dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		first := !m.loaded
 		m.rows, m.loaded, m.loading, m.updated = msg, true, false, m.now()
 		m.clampCursor()
+		// A new project opens on its empty Repos list, which says how to
+		// add one; the list stops being a stop once it has repos.
+		if m.hasRepos() {
+			m.onAddRepo = false
+		} else if first {
+			m.onAddRepo = true
+		}
 		if m.focus != "" {
 			before := m.cursor
 			m.focusRow()
@@ -278,7 +288,7 @@ func (m *dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
 	case tea.KeyMsg:
-		cursor, tab := m.cursor, m.tab
+		cursor, tab, onAdd := m.cursor, m.tab, m.onAddRepo
 		var model tea.Model = m
 		var cmd tea.Cmd
 		if m.form != nil {
@@ -287,9 +297,9 @@ func (m *dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			model, cmd = m.key(msg.String())
 		}
-		if m.cursor != cursor || m.tab != tab {
+		if m.cursor != cursor || m.tab != tab || m.onAddRepo != onAdd {
 			m.scroll = 0
-			if m.cursor < m.total() {
+			if m.cursor < m.total() && !m.onAddRepo {
 				m.lastIn[m.section(m.cursor)] = m.cursor
 			}
 			cmd = tea.Batch(cmd, m.fetchPanel())
@@ -305,7 +315,7 @@ func (m *dashboard) clampCursor() {
 }
 
 func (m *dashboard) current() (orchestrate.ServiceStatus, bool) {
-	if m.cursor < 0 || m.cursor >= len(m.rows) {
+	if m.onAddRepo || m.cursor < 0 || m.cursor >= len(m.rows) {
 		return orchestrate.ServiceStatus{}, false
 	}
 	return m.rows[m.cursor], true
@@ -396,11 +406,21 @@ func (m *dashboard) dispatch(key string) (tea.Model, tea.Cmd) {
 		}
 		m.scroll = max(0, m.scroll+step)
 	case "up", "k":
-		if m.cursor > 0 {
+		switch {
+		case m.onAddRepo:
+		case m.cursor > 0:
 			m.cursor--
+		case !m.hasRepos():
+			// Above the first service is the empty Repos list.
+			m.onAddRepo = true
 		}
 	case "down", "j":
-		if m.cursor < m.total()-1 {
+		switch {
+		case m.onAddRepo:
+			if m.total() > 0 {
+				m.onAddRepo, m.cursor = false, 0
+			}
+		case m.cursor < m.total()-1:
 			m.cursor++
 		}
 	case " ", "x":
@@ -444,6 +464,8 @@ func (m *dashboard) dispatch(key string) (tea.Model, tea.Cmd) {
 		return m, m.claude()
 	case "enter":
 		switch {
+		case m.onAddRepo:
+			m.openAddForm()
 		case !ok:
 		case !row.Repo:
 			m.message = row.Name + " is a container; it has no window"
@@ -589,6 +611,8 @@ func (m *dashboard) compactView() string {
 		b.WriteString("\n" + m.envView())
 	} else if v, ok := m.currentVolume(); ok {
 		b.WriteString("\n" + m.volumePanel(v, max(40, m.width)) + "\n")
+	} else if m.onAddRepo {
+		b.WriteString("\n" + addRepoHelp + "\n")
 	} else if r, ok := m.current(); ok {
 		b.WriteString("\n" + m.details(r))
 	}
@@ -621,7 +645,7 @@ func (m *dashboard) compactView() string {
 
 // table lists the repos, then the other services, one row each.
 func (m *dashboard) table() string {
-	if len(m.rows) == 0 {
+	if len(m.rows) == 0 && !m.onAddRepo {
 		return "compose.yml has no services yet; press n to add a repo.\n"
 	}
 	repoHead := []string{"REPO", "STATE", "PROCESSES", "BRANCH", "COMMIT", "DATE", "ENV"}
@@ -666,6 +690,9 @@ func (m *dashboard) table() string {
 			}
 		}
 	}
+	if m.onAddRepo {
+		b.WriteString(cursorStyle.Render("> ") + "  " + addRepoLine + "\n\n")
+	}
 	write(repoHead, repos, repoIdx)
 	if len(repos) > 0 && len(svcs) > 0 {
 		b.WriteString("\n")
@@ -695,9 +722,15 @@ func (m *dashboard) table() string {
 // jumpSection moves the cursor to the next list in direction dir (1 down,
 // -1 up, wrapping around) that has rows, where the cursor last was in it.
 func (m *dashboard) jumpSection(dir int) {
-	s := m.section(m.cursor)
+	s := m.focusSection()
 	for range 3 {
 		s = (s + dir + 3) % 3
+		if s == sectionRepos && !m.hasRepos() {
+			// The empty Repos list is a stop, to add a repo from.
+			m.onAddRepo = true
+			return
+		}
+		m.onAddRepo = false
 		if i, seen := m.lastIn[s]; seen && i < m.total() && m.section(i) == s {
 			m.cursor = i
 			return

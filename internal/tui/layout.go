@@ -120,6 +120,20 @@ func logsText(r orchestrate.ServiceStatus, logs func(string, time.Time) (string,
 	return out
 }
 
+// addRepoHelp is the right panel while the cursor is on the empty Repos list.
+var addRepoHelp = strings.Join([]string{
+	nameStyle.Render("No repos yet"),
+	"",
+	"Press enter or n to add one. The form asks for:",
+	"",
+	"  • a name, such as api",
+	"  • a git URL to clone, or none for a new app",
+	"  • a stack, such as rails or node",
+	"  • the stack's options, defaults ticked",
+	"",
+	labelStyle.Render("It runs neptuno add, as in a terminal."),
+}, "\n")
+
 // layoutView is the dashboard in panels: the project, repos and services on
 // the left, a tabbed panel for the row under the cursor on the right, and the
 // keys along the bottom.
@@ -143,7 +157,7 @@ func (m *dashboard) layoutView() string {
 	}
 	projectH := len(projectLines) + 2
 	rest := bodyH - projectH
-	focus := m.section(m.cursor)
+	focus := m.focusSection()
 	counts := []int{len(repos), len(svcs), len(m.volumes)}
 	// The focused list takes the room the others don't need.
 	heights := make([]int, 3)
@@ -158,7 +172,7 @@ func (m *dashboard) layoutView() string {
 
 	left := lipgloss.JoinVertical(lipgloss.Left,
 		box("Project", projectLines, leftW, projectH, false),
-		box(fmt.Sprintf("Repos %d", len(repos)), m.listLines(repos, heights[0]-2, leftW-2), leftW, heights[0], focus == sectionRepos),
+		box(fmt.Sprintf("Repos %d", len(repos)), m.repoLines(repos, heights[0]-2, leftW-2), leftW, heights[0], focus == sectionRepos),
 		box(fmt.Sprintf("Services %d", len(svcs)), m.listLines(svcs, heights[1]-2, leftW-2), leftW, heights[1], focus == sectionServices),
 		box(fmt.Sprintf("Volumes %d", len(m.volumes)), m.volumeLines(heights[2]-2, leftW-2), leftW, heights[2], focus == sectionVolumes),
 	)
@@ -208,6 +222,19 @@ func (m *dashboard) mcpLine() string {
 	return fmt.Sprintf("MCP %d · %s · %s", s.Servers,
 		mark(s.ProjectFileCurrent, ".mcp.json", ".mcp.json (neptuno mcp sync)"),
 		mark(s.Desktop, "desktop", "desktop (neptuno mcp desktop)"))
+}
+
+// repoLines renders the Repos list. Empty, it offers to add a repo, and the
+// cursor can rest on that line.
+func (m *dashboard) repoLines(idx []int, height, width int) []string {
+	if len(idx) > 0 {
+		return m.listLines(idx, height, width)
+	}
+	if !m.onAddRepo {
+		return []string{labelStyle.Render("none yet; press n to add one")}
+	}
+	plain := ansi.Truncate("  "+addRepoLine, width, "…")
+	return []string{selectedRow.Render(plain + strings.Repeat(" ", max(0, width-lipgloss.Width(plain))))}
 }
 
 // listLines renders the rows at idx, scrolled so the cursor shows.
@@ -326,6 +353,8 @@ func (m *dashboard) rightLines(height, width int) []string {
 		text = m.actionsView()
 	case onVolume:
 		text = m.volumePanel(v, width)
+	case m.onAddRepo:
+		text = addRepoHelp
 	case !ok:
 		text = "compose.yml has no services yet; press n to add a repo."
 	case m.tab == tabInfo:
@@ -367,6 +396,8 @@ func (m *dashboard) keyBar(width int) string {
 		{"c", "claude"}, {"m", "mcp"}, {"n", "add repo"}, {"space", "select"}, {"← →", "list"}, {"[ ]", "tab"}, {"q", "quit"}}
 	if m.tab == tabActions {
 		keys[0] = [2]string{"enter", "choose action"}
+	} else if m.onAddRepo {
+		keys = [][2]string{{"enter", "add a repo"}, {"↓ →", "services"}, {"[ ]", "tab"}, {"c", "claude"}, {"f", "refresh"}, {"q", "quit"}}
 	}
 	if m.envs != nil {
 		keys = [][2]string{{"↑↓", "choose"}, {"enter", "switch"}, {"esc", "cancel"}}

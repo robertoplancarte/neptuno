@@ -45,11 +45,32 @@ func (m *dashboard) total() int { return len(m.rows) + len(m.volumes) }
 // currentVolume is the volume under the cursor, if it is on one.
 func (m *dashboard) currentVolume() (orchestrate.Volume, bool) {
 	i := m.cursor - len(m.rows)
-	if i < 0 || i >= len(m.volumes) {
+	if m.onAddRepo || i < 0 || i >= len(m.volumes) {
 		return orchestrate.Volume{}, false
 	}
 	return m.volumes[i], true
 }
+
+// focusSection is the left-hand list the cursor is in.
+func (m *dashboard) focusSection() int {
+	if m.onAddRepo {
+		return sectionRepos
+	}
+	return m.section(m.cursor)
+}
+
+// hasRepos says whether the Repos list has any rows.
+func (m *dashboard) hasRepos() bool {
+	for _, r := range m.rows {
+		if r.Repo {
+			return true
+		}
+	}
+	return false
+}
+
+// addRepoLine is the empty Repos list's one line.
+const addRepoLine = "+ Add a repo (enter or n)"
 
 // section says which left-hand list row i is in.
 func (m *dashboard) section(i int) int {
