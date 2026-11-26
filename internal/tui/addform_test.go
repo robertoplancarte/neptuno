@@ -198,3 +198,98 @@ func TestActionsTabListsAndRunsActions(t *testing.T) {
 		t.Errorf("n in the focused list: form %v, focus %t", m.form, m.actionsFocus)
 	}
 }
+
+func TestAddFormTicksTheStackDefaults(t *testing.T) {
+	m := formDashboard(t)
+	key(m, "n")
+	typeText(m, "shop")
+	key(m, "down", "down")
+	for m.form.current().Name != "rails" {
+		key(m, "right")
+	}
+	want := map[string]bool{"mailpit": true, "tailwind": true, "action_text": false, "storage_s3": false, "playwright": false}
+	if !reflect.DeepEqual(m.form.on, want) {
+		t.Errorf("rails options = %v, want %v", m.form.on, want)
+	}
+	view := m.View()
+	for _, line := range []string{"[x] mailpit", "[x] tailwind", "[ ] action_text", "[ ] storage_s3", "[ ] playwright"} {
+		if !strings.Contains(view, line) {
+			t.Errorf("form view missing %q:\n%s", line, view)
+		}
+	}
+}
+
+// emptyDashboard is a new project: services but no repos yet.
+func emptyDashboard(t *testing.T) *dashboard {
+	m := formDashboard(t)
+	m.loaded = false
+	m.rows = nil
+	m.Update(statusMsg(dashboardRows()[2:]))
+	return m
+}
+
+func TestEmptyReposListTakesTheCursor(t *testing.T) {
+	m := emptyDashboard(t)
+	if !m.onAddRepo {
+		t.Fatal("a project with no repos did not open on the Repos list")
+	}
+	if _, ok := m.current(); ok {
+		t.Error("current() found a row while on the empty Repos list")
+	}
+	view := m.View()
+	for _, want := range []string{addRepoLine, "No repos yet", "Press enter or n to add one", "enter add a repo"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("view missing %q:\n%s", want, view)
+		}
+	}
+
+	// down and right go to the services, up and left come back.
+	key(m, "down")
+	if r, ok := m.current(); !ok || r.Name != "postgres" || m.onAddRepo {
+		t.Fatalf("down from the empty Repos list: on %q, onAddRepo %t", r.Name, m.onAddRepo)
+	}
+	if strings.Contains(m.View(), "No repos yet") {
+		t.Error("the add-a-repo help stayed after leaving the Repos list")
+	}
+	key(m, "up")
+	if !m.onAddRepo {
+		t.Fatal("up from the first service did not reach the empty Repos list")
+	}
+	key(m, "right")
+	if r, ok := m.current(); !ok || r.Name != "postgres" {
+		t.Fatalf("right from the empty Repos list went to %q", r.Name)
+	}
+	key(m, "left")
+	if !m.onAddRepo {
+		t.Fatal("left from the services did not reach the empty Repos list")
+	}
+
+	// enter there opens the add-repo form.
+	key(m, "enter")
+	if m.form == nil {
+		t.Fatal("enter on the empty Repos list did not open the add-repo form")
+	}
+	key(m, "esc")
+
+	// Once a repo shows up the list is an ordinary one again.
+	m.Update(statusMsg(dashboardRows()))
+	if m.onAddRepo {
+		t.Error("onAddRepo stayed on after the status listed repos")
+	}
+	if r, ok := m.current(); !ok || r.Name != "api" {
+		t.Errorf("cursor on %q once repos appeared, want api", r.Name)
+	}
+}
+
+func TestEmptyReposListInTheCompactView(t *testing.T) {
+	m := emptyDashboard(t)
+	m.width, m.height = 60, 10
+	view := m.View()
+	if !strings.Contains(view, "> ") || !strings.Contains(view, addRepoLine) {
+		t.Errorf("compact view does not show the add-a-repo line:\n%s", view)
+	}
+	key(m, "down")
+	if strings.Contains(m.View(), addRepoLine) {
+		t.Errorf("compact view still shows the add-a-repo line off the Repos list:\n%s", m.View())
+	}
+}

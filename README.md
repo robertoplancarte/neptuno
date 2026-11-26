@@ -418,6 +418,10 @@ fails the output stays up until `esc`. Cloning over SSH needs a key that
 doesn't prompt for a passphrase (an agent works), since the command has no
 terminal to ask in.
 
+In a project with no repos yet, the dashboard opens on the empty Repos list,
+whose one line is **+ Add a repo**: `enter` or `n` there opens the form, and
+`↓` or `→` moves on to the services.
+
 ### Volumes
 
 The **Volumes** list, under the services, has the named volumes in
