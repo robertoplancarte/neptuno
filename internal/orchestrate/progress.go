@@ -448,8 +448,27 @@ type streamRunner interface {
 
 // composeUp runs docker compose up for services, reporting each one's
 // progress for the dashboard while it pulls, builds and starts them.
-func (o *Orchestrator) composeUp(services []string) error {
-	args := append([]string{"compose", "up", "--detach"}, services...)
+func (o *Orchestrator) composeUp(services []string, flags ...string) error {
+	args := append(append([]string{"compose", "up", "--detach"}, flags...), services...)
+	return o.composeStream(services, args)
+}
+
+// composeBuild runs docker compose build for services, reporting their
+// progress for the dashboard as composeUp does.
+func (o *Orchestrator) composeBuild(services []string, noCache, pull bool) error {
+	args := []string{"compose", "build"}
+	if noCache {
+		args = append(args, "--no-cache")
+	}
+	if pull {
+		args = append(args, "--pull")
+	}
+	return o.composeStream(services, append(args, services...))
+}
+
+// composeStream runs a docker command about services, tracking their
+// progress from its output when the runner can stream it.
+func (o *Orchestrator) composeStream(services, args []string) error {
 	sr, ok := o.Runner.(streamRunner)
 	if !ok {
 		return o.Runner.Run(o.Project.Root, "docker", args...)

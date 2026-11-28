@@ -477,6 +477,14 @@ func (m *dashboard) dispatch(key string) (tea.Model, tea.Cmd) {
 		default:
 			return m, m.run("restart "+row.Name, []string{row.Name}, "restart", row.Name)
 		}
+	case "b":
+		switch {
+		case !ok:
+		case !row.Build:
+			m.message = row.Name + " has no build section in compose.yml, so there is no image to rebuild"
+		default:
+			return m, m.run("rebuild "+row.Name, []string{row.Name}, "rebuild", "--detach", row.Name)
+		}
 	case "c":
 		return m, m.claude()
 	case "enter":
@@ -638,7 +646,7 @@ func (m *dashboard) compactView() string {
 	if m.message != "" {
 		b.WriteString("\n" + m.message + "\n")
 	}
-	help := "↑↓ move · ←→ list · space select · enter open window · u up · s stop · r restart · e env · c claude · n add repo · f refresh · q quit"
+	help := "↑↓ move · ←→ list · space select · enter open window · u up · s stop · r restart · b rebuild · e env · c claude · n add repo · f refresh · q quit"
 	if m.envs != nil {
 		help = "↑↓ move · enter switch · esc cancel"
 	}

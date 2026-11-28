@@ -2,6 +2,7 @@ package tui
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -115,5 +116,30 @@ func TestStartingAServiceClearsItsLogs(t *testing.T) {
 	}
 	if _, ok := m.logsSince["postgres"]; ok {
 		t.Error("starting api cleared postgres's logs")
+	}
+}
+
+func TestDashboardRebuild(t *testing.T) {
+	m := newTestDashboard()
+	m.opts.Neptuno, m.opts.Root = "echo", t.TempDir()
+	m.width, m.height = 120, 30
+
+	if !slices.ContainsFunc(m.availableActions(), func(a menuAction) bool { return a.key == "b" }) {
+		t.Error("the Actions tab doesn't offer to rebuild api")
+	}
+	cmd := key(m, "b")
+	a := m.actions["api"]
+	if cmd == nil || a == nil {
+		t.Fatalf("b did not start an action: %v %+v", cmd, a)
+	}
+	drain(t, m, cmd)
+	if !reflect.DeepEqual(a.lines, []string{"rebuild --detach api"}) {
+		t.Errorf("action ran %v", a.lines)
+	}
+
+	// postgres comes from an image compose pulls.
+	key(m, "down", "down", "b")
+	if !strings.Contains(m.message, "no build section") {
+		t.Errorf("rebuild on postgres: %q", m.message)
 	}
 }

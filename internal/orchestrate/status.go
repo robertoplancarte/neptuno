@@ -54,6 +54,9 @@ type ServiceStatus struct {
 	MCPHealth map[string]mcp.Health
 	// DependsOn lists the direct dependencies.
 	DependsOn []string
+	// Build is true when compose builds the service's image from a
+	// Dockerfile, so `neptuno rebuild` can rebuild it.
+	Build bool
 	// Git describes the repo's checkout, or is nil when it has none.
 	Git *GitStatus
 	// Progress is what a running `neptuno up` is doing to the service's
@@ -144,7 +147,7 @@ func (o *Orchestrator) Status() []ServiceStatus {
 
 	var out []ServiceStatus
 	for _, name := range append(append([]string(nil), repos...), services...) {
-		s := ServiceStatus{Name: name, Repo: p.IsRepo(name), DependsOn: p.Services[name].DependsOn}
+		s := ServiceStatus{Name: name, Repo: p.IsRepo(name), DependsOn: p.Services[name].DependsOn, Build: p.Buildable(name)}
 		if c, ok := containers[name]; ok {
 			s.Container, s.Health, s.Ports = c.State, c.Health, c.ports()
 		}

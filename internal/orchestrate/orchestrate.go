@@ -42,6 +42,14 @@ type UpOptions struct {
 	Set map[string]string
 	// Detach skips attaching to the tmux session.
 	Detach bool
+	// Rebuild builds the selected services' images again before starting
+	// them, and recreates their containers from the new images, as after
+	// a change to a Dockerfile. Their dependencies start as usual.
+	Rebuild bool
+	// NoCache builds without the build cache, with Rebuild.
+	NoCache bool
+	// Pull pulls newer base images while building, with Rebuild.
+	Pull bool
 }
 
 // Plan is what Up will start.
@@ -91,6 +99,12 @@ func (o *Orchestrator) Up(opts UpOptions) error {
 	if err != nil {
 		return err
 	}
+	var rebuild []string
+	if opts.Rebuild {
+		if rebuild, err = o.rebuildTargets(opts.Selected); err != nil {
+			return err
+		}
+	}
 
 	st, err := state.Load(p.Root)
 	if err != nil {
@@ -129,10 +143,27 @@ func (o *Orchestrator) Up(opts UpOptions) error {
 		}
 	}
 
+	if len(rebuild) > 0 {
+		fmt.Fprintf(o.Log, "Rebuilding images: %s\n", strings.Join(rebuild, ", "))
+		if err := o.composeBuild(rebuild, opts.NoCache, opts.Pull); err != nil {
+			return err
+		}
+	}
+
 	before := o.containerIDs(windows)
-	if len(plan.Compose) > 0 {
-		fmt.Fprintf(o.Log, "Starting containers: %s\n", strings.Join(plan.Compose, ", "))
-		if err := o.composeUp(plan.Compose); err != nil {
+	// The rebuilt services start last, recreated from their new images
+	// even where compose would keep the old container, as podman-compose
+	// does; their dependencies start first, as usual.
+	rest := slices.DeleteFunc(slices.Clone(plan.Compose), func(name string) bool { return slices.Contains(rebuild, name) })
+	if len(rest) > 0 {
+		fmt.Fprintf(o.Log, "Starting containers: %s\n", strings.Join(rest, ", "))
+		if err := o.composeUp(rest); err != nil {
+			return err
+		}
+	}
+	if len(rebuild) > 0 {
+		fmt.Fprintf(o.Log, "Recreating containers: %s\n", strings.Join(rebuild, ", "))
+		if err := o.composeUp(rebuild, "--no-deps", "--force-recreate"); err != nil {
 			return err
 		}
 	}
@@ -156,7 +187,11 @@ func (o *Orchestrator) Up(opts UpOptions) error {
 		return err
 	}
 
-	st.LastUp = opts.Selected
+	// A rebuild of one service isn't a choice of what to run, so the
+	// menu keeps offering the last up's.
+	if !opts.Rebuild {
+		st.LastUp = opts.Selected
+	}
 	if err := state.Save(p.Root, st); err != nil {
 		return err
 	}
@@ -173,6 +208,24 @@ func (o *Orchestrator) Up(opts UpOptions) error {
 		return nil
 	}
 	return o.attach()
+}
+
+// rebuildTargets checks that every selected name has an image compose
+// builds, and returns them.
+func (o *Orchestrator) rebuildTargets(selected []string) ([]string, error) {
+	p := o.Project
+	for _, name := range selected {
+		_, inCompose := p.Services[name]
+		switch {
+		case p.IsRepo(name) && p.RunMode(name) == project.RunHost:
+			return nil, fmt.Errorf("%s runs on the host, so it has no image to rebuild; restart it with `neptuno restart %s`", name, name)
+		case !inCompose && !p.IsRepo(name):
+			return nil, fmt.Errorf("unknown service %q", name)
+		case !p.Buildable(name):
+			return nil, fmt.Errorf("compose.yml gives %s no build section, so its image is pulled, not built", name)
+		}
+	}
+	return selected, nil
 }
 
 // WriteEnvFiles resolves every repo's env into .neptuno/env/<repo>.env.

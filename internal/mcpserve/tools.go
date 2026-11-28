@@ -21,6 +21,10 @@ type (
 	restartArgs struct {
 		Target string `json:"target" jsonschema:"a repo, or repo:process for one of its Procfile processes"`
 	}
+	rebuildArgs struct {
+		Services []string `json:"services" jsonschema:"repos and compose services whose images compose builds from a Dockerfile"`
+		NoCache  bool     `json:"no_cache,omitempty" jsonschema:"build without the build cache"`
+	}
 	execArgs struct {
 		Repo    string `json:"repo" jsonschema:"the repo to run the command in"`
 		Command string `json:"command" jsonschema:"a shell command, run with sh -c in the repo's container (or in repos/<repo> for a repo that runs on the host)"`
@@ -76,6 +80,23 @@ func (s *Server) addOwnTools() {
 		Description: "Restarts a running repo's Procfile processes, or one of them with repo:process.",
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in restartArgs) (*sdk.CallToolResult, any, error) {
 		out, err := s.neptuno(ctx, "restart", in.Target)
+		return textResult(out, err), nil, nil
+	})
+
+	sdk.AddTool(s.Server, &sdk.Tool{
+		Name: "neptuno_rebuild",
+		Description: "Rebuilds repos' or services' images after a change to their Dockerfile, as `neptuno rebuild --detach` does: " +
+			"builds them with compose build, recreates their containers from the new images and restarts their processes. " +
+			"It can take minutes.",
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, in rebuildArgs) (*sdk.CallToolResult, any, error) {
+		if len(in.Services) == 0 {
+			return errorResult("name at least one repo or service; neptuno_status lists them"), nil, nil
+		}
+		args := []string{"rebuild", "--detach"}
+		if in.NoCache {
+			args = append(args, "--no-cache")
+		}
+		out, err := s.neptuno(ctx, append(args, in.Services...)...)
 		return textResult(out, err), nil, nil
 	})
 

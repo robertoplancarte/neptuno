@@ -53,6 +53,9 @@ type Config struct {
 type Service struct {
 	Name      string
 	DependsOn []string
+	// Build is true when compose.yml gives the service a build section, so
+	// compose builds its image from a Dockerfile rather than pulling it.
+	Build bool
 }
 
 // Project is a loaded Neptuno project.
@@ -138,6 +141,7 @@ type composeFile struct {
 	Name     string `yaml:"name"`
 	Services map[string]struct {
 		DependsOn dependsOn `yaml:"depends_on"`
+		Build     any       `yaml:"build"`
 	} `yaml:"services"`
 }
 
@@ -177,6 +181,7 @@ func (p *Project) loadCompose() error {
 			s := p.Services[svc]
 			s.Name = svc
 			s.DependsOn = appendUnique(s.DependsOn, def.DependsOn...)
+			s.Build = s.Build || def.Build != nil
 			p.Services[svc] = s
 		}
 	}
@@ -184,6 +189,16 @@ func (p *Project) loadCompose() error {
 		p.Name = cf.Name
 	}
 	return nil
+}
+
+// Buildable reports whether compose builds name's image from a Dockerfile,
+// so `neptuno rebuild` can rebuild it. A repo that runs on the host has no
+// image to build.
+func (p *Project) Buildable(name string) bool {
+	if p.IsRepo(name) && p.RunMode(name) == RunHost {
+		return false
+	}
+	return p.Services[name].Build
 }
 
 // IsRepo reports whether name is a repo known to Neptuno.

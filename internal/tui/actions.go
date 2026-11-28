@@ -59,7 +59,7 @@ func (m *dashboard) runAll(name string, targets []string, cmds ...[]string) tea.
 	}
 	// Starting or restarting begins a new run: its Logs tab starts empty.
 	for _, args := range cmds {
-		if len(args) > 0 && (args[0] == "up" || args[0] == "restart") {
+		if len(args) > 0 && (args[0] == "up" || args[0] == "restart" || args[0] == "rebuild") {
 			now := m.now()
 			for _, t := range targets {
 				m.logsSince[t] = now

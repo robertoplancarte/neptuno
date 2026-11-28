@@ -606,3 +606,53 @@ func TestUpResolvesEnvAgainAfterBeforeUpHook(t *testing.T) {
 		}
 	}
 }
+
+func TestUpRebuild(t *testing.T) {
+	t.Setenv("TMUX", "")
+	o, f := setup(t)
+	f.sessions, f.windows["api"], f.overminds[socket("api")] = true, true, true
+	f.containers["api"] = []string{"old", "new"}
+	if err := state.Save(o.Project.Root, state.State{LastUp: []string{"web"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := o.Up(UpOptions{Selected: []string{"api"}, Detach: true, Rebuild: true, NoCache: true}); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{
+		"docker compose build --no-cache api",
+		"docker compose up --detach postgres",
+		"docker compose up --detach --no-deps --force-recreate api",
+	}; !reflect.DeepEqual(f.cmds[:3], want) {
+		t.Errorf("commands:\n%s\nwant them to start with:\n%s", strings.Join(f.cmds, "\n"), strings.Join(want, "\n"))
+	}
+	// The recreated container takes the processes with it.
+	if !slices.ContainsFunc(f.cmds, func(c string) bool { return strings.HasPrefix(c, "overmind quit") }) ||
+		!slices.ContainsFunc(f.cmds, func(c string) bool { return strings.HasPrefix(c, "overmind start") }) {
+		t.Errorf("overmind was not restarted:\n%s", strings.Join(f.cmds, "\n"))
+	}
+	st, err := state.Load(o.Project.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(st.LastUp, []string{"web"}) {
+		t.Errorf("LastUp = %v, want the last up's kept", st.LastUp)
+	}
+}
+
+func TestUpRebuildRefusesWhatItCannotBuild(t *testing.T) {
+	o, f := setup(t)
+	for name, want := range map[string]string{
+		"postgres": "no build section",
+		"docs":     "runs on the host",
+		"nope":     "unknown service",
+	} {
+		err := o.Up(UpOptions{Selected: []string{name}, Rebuild: true})
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("rebuild %s: err = %v, want %q", name, err, want)
+		}
+	}
+	if len(f.cmds) > 0 {
+		t.Errorf("ran commands: %v", f.cmds)
+	}
+}

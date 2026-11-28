@@ -404,7 +404,7 @@ func (m *dashboard) rightLines(height, width int) []string {
 }
 
 func (m *dashboard) keyBar(width int) string {
-	keys := [][2]string{{"enter", "open"}, {"u", "up"}, {"s", "stop"}, {"r", "restart"}, {"e", "env"},
+	keys := [][2]string{{"enter", "open"}, {"u", "up"}, {"s", "stop"}, {"r", "restart"}, {"b", "rebuild"}, {"e", "env"},
 		{"c", "claude"}, {"m", "mcp"}, {"n", "add repo"}, {"space", "select"}, {"← →", "list"}, {"[ ]", "tab"}, {"q", "quit"}}
 	if m.tab == tabActions {
 		keys[0] = [2]string{"enter", "choose action"}
