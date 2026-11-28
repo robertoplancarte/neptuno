@@ -33,6 +33,10 @@ type RepoConfig struct {
 	// on, such as hyperdrive: /_hyperdrive/mcp. Neptuno works out the
 	// host and port from the Caddyfile.
 	MCP map[string]string `yaml:"mcp"`
+	// Health is where `neptuno restart` checks that the repo's app is up
+	// again: a path, such as /up, on the repo's Caddyfile site, a full URL,
+	// or off. Empty uses /up for a Rails app and / for anything else.
+	Health string `yaml:"health"`
 }
 
 // Hooks are scripts run at lifecycle points, relative to the project root.

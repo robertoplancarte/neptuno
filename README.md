@@ -321,6 +321,26 @@ with a note on how to run it again: `neptuno restart <repo>:<process>`
 Ctrl-D in that shell closes the window, and `neptuno restart` reopens it. Your own
 `~/.tmux.conf` still applies inside overmind's session.
 
+`neptuno restart` returns once the app is back up, so a test run right after
+it doesn't meet the proxy's 502s. It waits for the restarted processes to run
+again with new pids, then for the app to answer through the proxy: at `/up`
+for a Rails app, which answers once it has booted, and at `/` for others.
+Anything but a 502, 503 or 504 counts as up, and a 4xx or 5xx is reported as
+a warning. A process that exits while the app boots, or no answer within 90
+seconds, fails the restart with a non-zero exit. `--wait 3m` waits longer and
+`--no-wait` returns at once. Point the check elsewhere, or turn it off, in
+`neptuno.yml`:
+
+```yaml
+repos:
+  api:
+    health: /healthz      # a path on the repo's Caddyfile site, a full URL, or off
+```
+
+When a repo has more than one overmind daemon, as from starting it twice, or
+one its socket no longer reaches, `neptuno restart` and `neptuno up` stop
+them all and start one in their place, which restarts every process.
+
 ### Podman
 
 Neptuno uses Docker when `docker` is on the PATH and Podman when only

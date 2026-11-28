@@ -1,6 +1,7 @@
 package orchestrate
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -32,6 +33,10 @@ type Orchestrator struct {
 	// remembers answers, for a dashboard that asks every few seconds. Nil
 	// probes every server on every call, as `neptuno status` does once.
 	MCPProber *mcp.Prober
+
+	// healthProbe, when set, replaces the GET Restart sends to check that
+	// the app is up, for tests.
+	healthProbe func(ctx context.Context, url string) (int, error)
 }
 
 // UpOptions configures Up.
@@ -356,6 +361,14 @@ func (o *Orchestrator) openWindow(repo string, restart bool) error {
 	p := o.Project
 	sock := socket(repo)
 	running := o.Runner.Check(p.Root, "overmind", "status", "-s", sock)
+	// More than one overmind for the repo, as from starting it twice, or
+	// one its socket no longer reaches: they fight over the same ports, so
+	// replace them all with one.
+	daemons := o.hostOverminds()
+	if n := countFor(daemons, repo); n > 1 || n == 1 && !running {
+		o.warnStray(repo, n, running)
+		restart = true
+	}
 	switch {
 	case running && !restart && o.hasWindow(repo):
 		o.sweep(repo, o.currentRun(repo))
@@ -367,9 +380,8 @@ func (o *Orchestrator) openWindow(repo string, restart bool) error {
 	default:
 		// Replace an overmind whose container was recreated, and a window
 		// that outlived its overmind.
-		if running {
-			_ = o.Runner.Check(p.Root, "overmind", "quit", "-s", sock)
-		}
+		answered := running && o.Runner.Check(p.Root, "overmind", "quit", "-s", sock)
+		o.stopStray(repo, daemons, answered)
 		if o.hasWindow(repo) {
 			if err := o.Runner.Run(p.Root, "tmux", "kill-window", "-t", o.target(repo)); err != nil {
 				return err
@@ -618,27 +630,6 @@ func DeadPaneCommand(repo, process, status string) string {
 	}
 	msg := fmt.Sprintf("%s %s. Run it again with: neptuno restart %s:%s", process, exited, repo, process)
 	return deadPaneMark + fmt.Sprintf(`echo; echo %s; echo; exec "${SHELL:-/bin/sh}"`, procfile.Quote(msg))
-}
-
-// Restart restarts a repo's processes, or one of them, through its running
-// overmind.
-func (o *Orchestrator) Restart(repo, process string) error {
-	p := o.Project
-	if !p.IsRepo(repo) {
-		return fmt.Errorf("unknown repo %q", repo)
-	}
-	if !o.Runner.Check(p.Root, "overmind", "status", "-s", socket(repo)) {
-		return fmt.Errorf("%s is not running; start it with `neptuno up %s`", repo, repo)
-	}
-	if err := o.reopenClosedWindows(repo, process); err != nil {
-		return err
-	}
-	o.sweep(repo, o.currentRun(repo))
-	args := []string{"restart", "-s", socket(repo)}
-	if process != "" {
-		args = append(args, process)
-	}
-	return o.Runner.Run(p.Root, "overmind", args...)
 }
 
 // reopenClosedWindows gives each process being restarted whose window was

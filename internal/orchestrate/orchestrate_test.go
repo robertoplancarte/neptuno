@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -39,6 +40,11 @@ type fakeRunner struct {
 	// panes is what list-panes prints for the dashboard window: each
 	// pane's ID and start command.
 	panes string
+	// alive holds the pids `kill -0` finds.
+	alive map[int]bool
+	// statuses are what `overmind status` prints on successive calls; the
+	// last one repeats.
+	statuses []string
 }
 
 func (f *fakeRunner) Run(dir, name string, args ...string) error {
@@ -74,7 +80,15 @@ func (f *fakeRunner) Check(dir, name string, args ...string) bool {
 			return ok
 		}
 	}
+	if name == "kill" && args[0] == "-0" {
+		pid, _ := strconv.Atoi(args[1])
+		return f.alive[pid]
+	}
 	if name == "kill" {
+		if args[0] == "-TERM" || args[0] == "-KILL" {
+			pid, _ := strconv.Atoi(args[1])
+			delete(f.alive, pid)
+		}
 		f.cmds = append(f.cmds, name+" "+strings.Join(args, " "))
 		return true
 	}
@@ -104,6 +118,13 @@ func (f *fakeRunner) Output(dir, name string, args ...string) (string, error) {
 			}
 		}
 		return "", nil
+	}
+	if name == "overmind" && args[0] == "status" && len(f.statuses) > 0 {
+		out := f.statuses[0]
+		if len(f.statuses) > 1 {
+			f.statuses = f.statuses[1:]
+		}
+		return out, nil
 	}
 	if name == "tmux" && args[0] == "list-panes" {
 		return strings.TrimSpace(f.panes), nil
@@ -416,7 +437,7 @@ func TestUpSweepsEarlierRuns(t *testing.T) {
 	}
 
 	f.execs = nil
-	if err := o.Restart("api", ""); err != nil {
+	if err := o.Restart("api", "", RestartOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(f.execs, want) {
@@ -437,11 +458,11 @@ func TestDeadPaneCommand(t *testing.T) {
 
 func TestRestart(t *testing.T) {
 	o, f := setup(t)
-	if err := o.Restart("api", "web"); err == nil {
+	if err := o.Restart("api", "web", RestartOptions{}); err == nil {
 		t.Error("restarted api although its overmind is not running")
 	}
 	f.overminds[socket("api")] = true
-	if err := o.Restart("api", "web"); err != nil {
+	if err := o.Restart("api", "web", RestartOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if last := f.cmds[len(f.cmds)-1]; last != "overmind restart -s .neptuno/run/api.sock web" {
@@ -461,7 +482,7 @@ func TestRestartReopensClosedWindows(t *testing.T) {
 	}
 	f.overmindWindows = "web\n" // the worker window was closed
 	f.cmds = nil
-	if err := o.Restart("api", ""); err != nil {
+	if err := o.Restart("api", "", RestartOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
@@ -471,7 +492,7 @@ func TestRestartReopensClosedWindows(t *testing.T) {
 	if !reflect.DeepEqual(f.cmds, want) {
 		t.Errorf("commands:\n%s", strings.Join(f.cmds, "\n"))
 	}
-	if err := o.Restart("api", "nope"); err == nil || !strings.Contains(err.Error(), "web, worker") {
+	if err := o.Restart("api", "nope", RestartOptions{}); err == nil || !strings.Contains(err.Error(), "web, worker") {
 		t.Errorf("unknown process: %v", err)
 	}
 }

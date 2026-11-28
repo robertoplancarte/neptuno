@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/mattn/go-isatty"
 	"github.com/robertoplancarte/neptuno/internal/env"
@@ -152,12 +153,22 @@ func loadOrchestrator(cmd *cobra.Command) (*orchestrate.Orchestrator, error) {
 }
 
 func newRestartCommand() *cobra.Command {
-	return &cobra.Command{
+	var wait time.Duration
+	var noWait bool
+	cmd := &cobra.Command{
 		Use:   "restart [repo[:process]]",
-		Short: "Restart a repo's processes, or one of them",
+		Short: "Restart a repo's processes, or one of them, and wait for the app",
 		Long: "Restarts the repo's processes through its running overmind, or only the\n" +
 			"named one, as in `neptuno restart api:web`. With no arguments inside a\n" +
-			"repo's folder, restarts that repo.",
+			"repo's folder, restarts that repo.\n\n" +
+			"It then waits for the processes to run again and for the app to answer\n" +
+			"through the proxy, so tests run right after it don't meet 502s: at /up\n" +
+			"for a Rails app and / for others, or the path or URL neptuno.yml gives\n" +
+			"as repos.<repo>.health (off skips the check). Only a 502, 503 or 504\n" +
+			"or no answer counts as not up yet. --wait sets how long it waits, and\n" +
+			"--no-wait returns at once.\n\n" +
+			"A repo with more than one overmind daemon, as from starting it twice,\n" +
+			"or one its socket no longer reaches, gets them replaced with one.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o, err := loadOrchestrator(cmd)
@@ -171,9 +182,15 @@ func newRestartCommand() *cobra.Command {
 				return errors.New("name a repo, such as `neptuno restart api` or `neptuno restart api:web`")
 			}
 			repo, process, _ := strings.Cut(target, ":")
-			return o.Restart(repo, process)
+			if noWait {
+				wait = 0
+			}
+			return o.Restart(repo, process, orchestrate.RestartOptions{Wait: wait})
 		},
 	}
+	cmd.Flags().DurationVar(&wait, "wait", orchestrate.DefaultRestartWait, "how long to wait for the app to answer")
+	cmd.Flags().BoolVar(&noWait, "no-wait", false, "return once overmind is told to restart, without waiting")
+	return cmd
 }
 
 // newPaneDiedCommand backs the pane-died hook in overmind's tmux config: it
