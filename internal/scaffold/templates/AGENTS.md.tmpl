@@ -2,7 +2,8 @@
 
 This folder is a [Neptuno](https://github.com/robertoplancarte/neptuno)
 project: a development environment for several repos, run with docker
-compose, overmind and tmux. Run every command below from this folder.
+compose (or podman compose), overmind and tmux. Run every command below from
+this folder. `neptuno compose` runs whichever compose this machine has.
 
 ## Layout
 
@@ -37,9 +38,9 @@ compose, overmind and tmux. Run every command below from this folder.
   arguments it stops the whole project.
 - `neptuno restart <repo>` restarts a repo's processes, and
   `neptuno restart <repo>:<process>` one of them.
-- `docker compose logs --tail 100 <repo>` shows a container's output,
+- `neptuno compose logs --tail 100 <repo>` shows a container's output,
   including its `entrypoint.sh` setup.
-- After changing a Dockerfile, run `docker compose build <repo>` and then
+- After changing a Dockerfile, run `neptuno compose build <repo>` and then
   `neptuno up -d <repo>`.
 
 ## Working inside a repo

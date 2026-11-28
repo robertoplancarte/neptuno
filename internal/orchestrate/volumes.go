@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/robertoplancarte/neptuno/internal/engine"
 )
 
 // Volume is a named volume of the project's compose file.
@@ -147,7 +149,7 @@ func (o *Orchestrator) ResetVolume(name string) error {
 		return err
 	}
 	if v.External {
-		return fmt.Errorf("%s is an external volume, which compose.yml doesn't own; remove it with `docker volume rm %s` if you mean to", v.Name, v.Docker)
+		return fmt.Errorf("%s is an external volume, which compose.yml doesn't own; remove it with `%s volume rm %s` if you mean to", v.Name, engine.Current().Name, v.Docker)
 	}
 	p := o.Project
 	containers := o.composeContainers()
@@ -190,7 +192,7 @@ func (o *Orchestrator) ResetVolume(name string) error {
 // VolumeDetail is what docker knows about a volume and what is in it.
 type VolumeDetail struct {
 	// Driver, Mountpoint and Created come from `docker volume inspect`.
-	// The mountpoint is inside Docker's VM on a Mac.
+	// The mountpoint is inside the engine's VM (Docker's or Podman's) on a Mac.
 	Driver, Mountpoint string
 	Created            time.Time
 	// Size is its disk usage as du prints it, such as 48M.
@@ -210,6 +212,11 @@ const maxEntries = 30
 // peekScript prints the disk usage of the folder in $1, then its top-level
 // entries, folders marked with a slash.
 const peekScript = `cd "$1" && du -sh . 2>/dev/null | cut -f1 && ls -A1p`
+
+// busyboxImage is the throwaway container InspectVolume looks in. It is
+// fully qualified because Podman may refuse, or ask which registry to use,
+// for a short name.
+const busyboxImage = "docker.io/library/busybox"
 
 // InspectVolume looks inside a volume: its size and top-level entries. It
 // runs du and ls in a running container that mounts it, or else in a
@@ -245,7 +252,7 @@ func (o *Orchestrator) InspectVolume(v Volume) (VolumeDetail, error) {
 	}
 	if !ran {
 		var err error
-		out, err = o.Runner.Output(root, "docker", "run", "--rm", "-v", v.Docker+":/volume:ro", "busybox", "sh", "-c", peekScript, "sh", "/volume")
+		out, err = o.Runner.Output(root, "docker", "run", "--rm", "-v", v.Docker+":/volume:ro", busyboxImage, "sh", "-c", peekScript, "sh", "/volume")
 		if err != nil {
 			return d, fmt.Errorf("looking inside %s: %w", v.Docker, err)
 		}

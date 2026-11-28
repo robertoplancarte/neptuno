@@ -28,12 +28,14 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/robertoplancarte/neptuno/internal/engine"
 	"github.com/robertoplancarte/neptuno/internal/procfile"
 )
 
@@ -119,7 +121,9 @@ type ExecOptions struct {
 	Script string
 	// Run is the overmind run the process belongs to.
 	Run string
-	// Docker is the docker binary, "docker" when empty.
+	// Docker is the command that runs compose, such as "docker" for
+	// `docker compose`; empty means the machine's engine's compose, such
+	// as `podman compose`. A fake in tests stands in for docker.
 	Docker string
 	// Stdin, Stdout and Stderr are the Procfile line's terminal.
 	Stdin          io.Reader
@@ -137,10 +141,12 @@ type ExecOptions struct {
 // line, to the command's process group in the container, and a SIGHUP,
 // which means the line's terminal went away, ends the line.
 func Exec(opts ExecOptions) int {
-	docker := opts.Docker
-	if docker == "" {
-		docker = "docker"
+	// compose is the command line before compose's subcommand.
+	compose := []string{opts.Docker, "compose"}
+	if opts.Docker == "" {
+		compose = engine.Current().Compose
 	}
+	docker, composeArgs := compose[0], compose[1:]
 	if opts.Run == "" {
 		opts.Run = "manual"
 	}
@@ -158,7 +164,7 @@ func Exec(opts ExecOptions) int {
 
 	// The watchdog gets its own process group, so the signals overmind
 	// sends the line's group reach it only through the pipe, in order.
-	watch := exec.Command(docker, append(append([]string{"compose", "exec", "-T"}, env...), opts.Service, "sh", "-c", WatchScript)...)
+	watch := exec.Command(docker, append(append(append(slices.Clone(composeArgs), "exec", "-T"), env...), opts.Service, "sh", "-c", WatchScript)...)
 	watch.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	pipe, err := watch.StdinPipe()
 	var watchDone chan struct{}
@@ -222,7 +228,7 @@ func Exec(opts ExecOptions) int {
 		oneShot("")
 	}
 
-	main := exec.Command(docker, append(append([]string{"compose", "exec"}, env...), opts.Service, "sh", "-c", opts.Script)...)
+	main := exec.Command(docker, append(append(append(slices.Clone(composeArgs), "exec"), env...), opts.Service, "sh", "-c", opts.Script)...)
 	main.Stdin, main.Stdout, main.Stderr = opts.Stdin, opts.Stdout, opts.Stderr
 	if err := main.Start(); err != nil {
 		fmt.Fprintf(opts.Stderr, "neptuno: %v\n", err)

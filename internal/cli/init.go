@@ -11,6 +11,7 @@ import (
 
 	"github.com/mattn/go-isatty"
 
+	"github.com/robertoplancarte/neptuno/internal/engine"
 	"github.com/robertoplancarte/neptuno/internal/project"
 	"github.com/robertoplancarte/neptuno/internal/scaffold"
 	"github.com/robertoplancarte/neptuno/internal/tui"
@@ -192,7 +193,7 @@ func addServices(cmd *cobra.Command, root string, chosen []string, interactive b
 		return err
 	}
 	if added {
-		fmt.Fprintln(out, "\nStart them with `neptuno up -d` or `docker compose up -d`.")
+		fmt.Fprintf(out, "\nStart them with `neptuno up -d` or `%s up -d`.\n", engine.Current().ComposeCommand())
 	}
 	return nil
 }

@@ -147,7 +147,7 @@ func TestInspectVolume(t *testing.T) {
 	// With postgres stopped, a throwaway container looks instead.
 	delete(r.outputs, "docker compose ps --all")
 	delete(r.outputs, "docker compose exec -T postgres")
-	r.outputs["docker run --rm -v acme_postgres_data:/volume:ro busybox"] = "8.0K\n"
+	r.outputs["docker run --rm -v acme_postgres_data:/volume:ro docker.io/library/busybox"] = "8.0K\n"
 	if d, err = o.InspectVolume(v); err != nil || d.Size != "8.0K" || len(d.Entries) != 0 || !strings.Contains(d.Via, "throwaway") {
 		t.Errorf("detail with postgres stopped: %+v, %v", d, err)
 	}

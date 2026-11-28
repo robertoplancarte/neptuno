@@ -2,7 +2,7 @@
 # Runs each time the {{.Name}} container starts, before its command. Neptuno
 # holds the Procfile's processes until this touches /dev/shm/neptuno-ready,
 # or stops them if it touches /dev/shm/neptuno-failed. /dev/shm starts empty
-# on every container start. Setup output: docker compose logs {{.Name}}
+# on every container start. Setup output: neptuno compose logs {{.Name}}
 setup() {
   [ -f Gemfile ] || return 0 # no app yet while `neptuno add` runs rails new
   # Gems live in the {{.Name}}_bundle volume, so this only installs what

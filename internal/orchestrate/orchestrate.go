@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robertoplancarte/neptuno/internal/engine"
 	"github.com/robertoplancarte/neptuno/internal/env"
 	"github.com/robertoplancarte/neptuno/internal/mcp"
 	"github.com/robertoplancarte/neptuno/internal/procfile"
@@ -238,10 +239,18 @@ func (o *Orchestrator) warnIfEmpty(repo string) {
 	}
 }
 
+// missingEngine names what to install when the container engine is missing.
+func missingEngine() string {
+	if e := engine.Current(); e.IsPodman() || len(e.Programs()) > 1 {
+		return strings.Join(e.Programs(), " and ")
+	}
+	return "docker (or podman)"
+}
+
 func (o *Orchestrator) checkTools(docker, overmind bool) error {
 	var need []string
 	if docker {
-		need = append(need, "docker")
+		need = append(need, engine.Docker)
 	}
 	if overmind {
 		need = append(need, "tmux", "overmind")
@@ -249,6 +258,10 @@ func (o *Orchestrator) checkTools(docker, overmind bool) error {
 	var missing []string
 	for _, tool := range need {
 		if o.Runner.LookPath(tool) != nil {
+			if tool == engine.Docker {
+				// The runner looks for the engine's programs, such as podman.
+				tool = missingEngine()
+			}
 			missing = append(missing, tool)
 		}
 	}

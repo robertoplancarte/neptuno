@@ -87,11 +87,11 @@ func ContainerScript(service, command string, waitForEntrypoint bool) string {
 	wait := ""
 	if waitForEntrypoint {
 		done := fmt.Sprintf("[ -e %s ] || [ -e %s ]", ReadyMarker, FailedMarker)
-		wait = fmt.Sprintf("if ! { %[1]s; }; then echo \"Waiting for the %[3]s entrypoint.sh to finish (docker compose logs -f %[3]s)\"; "+
+		wait = fmt.Sprintf("if ! { %[1]s; }; then echo \"Waiting for the %[3]s entrypoint.sh to finish (neptuno compose logs -f %[3]s)\"; "+
 			"until %[1]s; do sleep 1; done; fi; "+
 			"if [ -e %[2]s ]; then { echo \"The %[3]s entrypoint.sh failed, so this process did not start.\"; "+
-			"if [ -s %[4]s ]; then echo \"Its last lines (all of them: docker compose logs %[3]s):\"; echo; tail -n 40 %[4]s; else echo \"See docker compose logs %[3]s\"; fi; "+
-			"echo; echo \"Fix it, then run: docker compose restart %[3]s && neptuno restart %[3]s\"; } >&2; exit 1; fi; ",
+			"if [ -s %[4]s ]; then echo \"Its last lines (all of them: neptuno compose logs %[3]s):\"; echo; tail -n 40 %[4]s; else echo \"See neptuno compose logs %[3]s\"; fi; "+
+			"echo; echo \"Fix it, then run: neptuno compose restart %[3]s && neptuno restart %[3]s\"; } >&2; exit 1; fi; ",
 			done, FailedMarker, service, SetupLog)
 	}
 	return record + wait + command

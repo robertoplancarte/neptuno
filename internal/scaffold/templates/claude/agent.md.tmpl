@@ -38,7 +38,7 @@ project folder, so you read and edit the files there directly.
   `postgres:5432`), not `localhost`.
 {{- end}}
 - `neptuno status` shows whether {{.Name}} and the services it needs run,
-  `docker compose logs --tail 100 {{.Name}}` shows its output, and
+  `neptuno compose logs --tail 100 {{.Name}}` shows its output, and
   `neptuno restart {{.Name}}` restarts its processes after a change that
   needs it.
 - The project's MCP servers, such as database, mail and webhook tools, are

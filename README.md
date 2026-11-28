@@ -2,7 +2,7 @@
 
 Neptuno is an "environment as code" framework: one CLI and TUI that runs a
 multi-repo development environment by driving tools you already use, docker
-compose for containers, overmind for processes and tmux for terminals. It aims
+compose (or Podman) for containers, overmind for processes and tmux for terminals. It aims
 to be opinionated enough to get you going fast, and customizable enough to run
 just the way you work.
 
@@ -19,7 +19,7 @@ go install github.com/robertoplancarte/neptuno/cmd/neptuno@latest
 ```sh
 neptuno init acme
 cd acme
-docker compose up -d   # Caddy, PostgreSQL 18, Valkey 8, SeaweedFS, Mailpit, Hook0
+neptuno compose up -d  # Caddy, PostgreSQL 18, Valkey 8, SeaweedFS, Mailpit, Hook0
 ```
 
 In a terminal, `neptuno init` first shows a checklist of the shared
@@ -139,7 +139,7 @@ The `rails` stack keeps installed gems in a `<repo>_bundle` named volume at
 `<repo>_node_modules` volume; `neptuno add` mounts them and declares them in
 `compose.yml`. They survive rebuilt and recreated containers, so the Rails
 entrypoint's `bundle check || bundle install` only installs when
-`Gemfile.lock` changes. Named volumes live inside Docker's VM, so they run at
+`Gemfile.lock` changes. Named volumes live inside Docker's (or Podman's) VM, so they run at
 native speed on a Mac. To start one over, say for a clean `bundle install`,
 select it in the dashboard's Volumes list and press `enter`, or run `neptuno volumes reset <repo>_bundle` (see
 [Volumes](#volumes)).
@@ -297,7 +297,7 @@ tmux session, with every Procfile line run in the repo's container with
 and Neptuno attaches you to that session. `neptuno down [service...]` stops
 them again. Run with no arguments inside a repo's folder under `environments/`,
 `dockerfiles/`, `procfiles/` or `repos/`, `up`, `down` and `env show` act on
-that repo. You need docker, tmux and
+that repo. You need Docker or Podman (see [Podman](#podman)), tmux and
 [overmind](https://github.com/DarthSim/overmind) installed.
 
 Overmind runs in the background with `--any-can-die`, so a process that
@@ -312,6 +312,53 @@ with a note on how to run it again: `neptuno restart <repo>:<process>`
 (`neptuno restart <repo>` restarts all of a repo's processes). `exit` or
 Ctrl-D in that shell closes the window, and `neptuno restart` reopens it. Your own
 `~/.tmux.conf` still applies inside overmind's session.
+
+### Podman
+
+Neptuno uses Docker when `docker` is on the PATH and Podman when only
+`podman` is, so a Mac with Podman instead of Docker Desktop works as is:
+`docker compose ...` becomes `podman compose ...` and `docker volume ...`
+becomes `podman volume ...`. Set `NEPTUNO_ENGINE=podman` (or `docker`) to
+choose when both are installed, and `NEPTUNO_COMPOSE=podman-compose` to run a
+compose command of your own instead of `podman compose`. `neptuno compose
+<args>` runs whichever compose this machine uses in the project folder, so
+`neptuno compose logs --tail 100 api` works for everyone on a team, and it is
+what the scaffolded `AGENTS.md` and skills tell coding agents to run.
+
+On a Mac:
+
+```sh
+brew install podman docker-compose
+podman machine init && podman machine start
+```
+
+`podman compose` hands the work to a compose provider, and Neptuno reads
+`compose ps`, `compose config` and `compose up`'s output the way Docker
+Compose prints them, so install `docker-compose` (Podman Desktop can install
+it too) rather than relying on `podman-compose`. `podman compose` points it at
+the Podman machine's socket itself; you don't need `DOCKER_HOST` or Docker's
+socket. Neptuno also turns off the "Executing external compose provider"
+banner Podman prints on every run, through a `containers.conf` override in
+your cache folder, unless you set `CONTAINERS_CONF_OVERRIDE` yourself.
+
+Differences to know about:
+
+- **Reaching the host.** Podman adds both `host.containers.internal` and
+  `host.docker.internal` to each container's `/etc/hosts`, so Caddy sites
+  that proxy to a `run: host` repo through `host.docker.internal` keep
+  working. If an old Podman lacks the second name, use the first.
+- **Ports below 1024.** The proxy publishes port 80. That works with Podman
+  on a Mac; rootless Podman on Linux needs
+  `sudo sysctl net.ipv4.ip_unprivileged_port_start=80`, or change the
+  proxy's `ports` in `compose.yml` to `"8080:80"`.
+- **Short image names.** `image: postgres:18` and `FROM ruby:3.4` resolve
+  on Docker Hub, as Podman's default `registries.conf` does. If yours asks
+  which registry to use, write the full name, such as
+  `docker.io/library/postgres:18`.
+- **Volumes and bind mounts.** Named volumes live in the Podman machine.
+  `./repos/<repo>` is shared into it from your Mac, and with rootless
+  Podman a container's root user writes files as you, so files the
+  containers create in `repos/` are yours on the Mac.
 
 ### Processes left running in a container
 
