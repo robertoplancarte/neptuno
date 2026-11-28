@@ -19,6 +19,7 @@ import (
 	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/robertoplancarte/neptuno/internal/engine"
 	"github.com/robertoplancarte/neptuno/internal/mcp"
 	"github.com/robertoplancarte/neptuno/internal/project"
 )
@@ -104,6 +105,7 @@ func New(opts Options) *Server {
 }
 
 func run(ctx context.Context, dir, name string, args ...string) (string, error) {
+	name, args = engine.Current().Command(name, args...)
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	var out bytes.Buffer

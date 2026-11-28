@@ -94,7 +94,7 @@ func TestWrapContainerWaitsForEntrypoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, _ = exec.Command("sh", "-c", script).CombinedOutput()
-	if !strings.Contains(string(out), "PG::DuplicateTable") || !strings.Contains(string(out), "docker compose restart api && neptuno restart api") {
+	if !strings.Contains(string(out), "PG::DuplicateTable") || !strings.Contains(string(out), "neptuno compose restart api && neptuno restart api") {
 		t.Errorf("setup log: %q", out)
 	}
 }

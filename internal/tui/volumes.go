@@ -230,7 +230,7 @@ func volumeDetailText(v orchestrate.Volume, inspect func(orchestrate.Volume) (or
 		add("Created", d.Created.Local().Format("Mon Jan 2 2006 15:04"))
 	}
 	if d.Mountpoint != "" {
-		add("Host path", d.Mountpoint+labelStyle.Render(" (inside Docker's VM on a Mac)"))
+		add("Host path", d.Mountpoint+labelStyle.Render(" (inside the Docker or Podman VM on a Mac)"))
 	}
 	if err != nil {
 		add("Inside", errStyle.Render(err.Error()))

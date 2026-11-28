@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mattn/go-isatty"
+	"github.com/robertoplancarte/neptuno/internal/engine"
 	"github.com/robertoplancarte/neptuno/internal/orchestrate"
 	"github.com/robertoplancarte/neptuno/internal/procfile"
 	"github.com/robertoplancarte/neptuno/internal/project"
@@ -53,7 +54,8 @@ func newExecCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			run := exec.Command(c.Args[0], c.Args[1:]...)
+			argv := engine.Current().Argv(c.Args)
+			run := exec.Command(argv[0], argv[1:]...)
 			run.Dir, run.Stdin, run.Stdout, run.Stderr = c.Dir, os.Stdin, os.Stdout, os.Stderr
 			err = run.Run()
 			var exit *exec.ExitError

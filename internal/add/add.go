@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/robertoplancarte/neptuno/internal/engine"
 	"github.com/robertoplancarte/neptuno/internal/orchestrate"
 	"github.com/robertoplancarte/neptuno/internal/project"
 	"github.com/robertoplancarte/neptuno/internal/scaffold"
@@ -349,7 +350,7 @@ func (a *Adder) reloadCaddy() {
 		return
 	}
 	if !a.Runner.Check(root, "docker", "compose", "exec", "proxy", "caddy", "reload", "--config", "/etc/caddy/Caddyfile") {
-		fmt.Fprintln(a.Log, "warning: could not reload Caddy; run `docker compose restart proxy`")
+		fmt.Fprintf(a.Log, "warning: could not reload Caddy; run `%s restart proxy`\n", engine.Current().ComposeCommand())
 	}
 }
 
@@ -361,7 +362,7 @@ func (a *Adder) generate(stack *stacks.Stack, data stacks.Data) error {
 		return err
 	}
 	if a.Runner.LookPath("docker") != nil {
-		return fmt.Errorf("the %s stack runs its generator in docker, which was not found; rerun `%s` once it is installed", stack.Name, rerun(stack, data))
+		return fmt.Errorf("the %s stack runs its generator in a container, but %s was not found; rerun `%s` once it is installed", stack.Name, strings.Join(engine.Current().Programs(), " and "), rerun(stack, data))
 	}
 
 	// Reload so the new repo and service are known, then write env files:

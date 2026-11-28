@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/robertoplancarte/neptuno/internal/engine"
 	"github.com/robertoplancarte/neptuno/internal/procs"
 	"github.com/robertoplancarte/neptuno/internal/project"
 )
@@ -160,7 +161,7 @@ func (o *Orchestrator) explainConflict(s ServiceStatus, process string, c Confli
 	case h.Run != "":
 		return fmt.Sprintf("%s, which this run's %s started", prefix, h.Proc)
 	}
-	return fmt.Sprintf("%s, which neptuno did not start (such as one run by hand with docker compose exec); stop it with: docker compose exec %s kill %d", prefix, repo, h.PID)
+	return fmt.Sprintf("%[1]s, which neptuno did not start (such as one run by hand with %[2]s exec); stop it with: %[2]s exec %[3]s kill %[4]d", prefix, engine.Current().ComposeCommand(), repo, h.PID)
 }
 
 func itoa(n int) string {
