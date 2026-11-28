@@ -67,14 +67,71 @@ options:
       # container, through its server at PLAYWRIGHT_SERVER_URL. The app under
       # test listens on every interface of this container, and the browser
       # reaches it by the repo's compose name, SYSTEM_TESTS_HOST.
+      #
+      # The browser also sends every request through SystemTestsProxy below,
+      # which hands it to the app under test whatever its host. So tests can
+      # visit subdomains and custom domains that no DNS knows, such as
+      # visit "http://acme.example.com/" (Capybara adds the port). Requests to
+      # outside sites reach the app too; SYSTEM_TESTS_PROXY picks:
+      #   on (default)  send every host to the app, except those in
+      #                 SYSTEM_TESTS_PROXY_BYPASS, a comma-separated list such
+      #                 as "*.googleapis.com,cdn.example.net", which go direct
+      #   off           no proxy: only SYSTEM_TESTS_HOST reaches the app
+      SYSTEM_TESTS_HOST = ENV.fetch("SYSTEM_TESTS_HOST") { Socket.gethostname }
+
+      # Chromium's HTTP proxy, run in this test process. Plain requests come
+      # with the whole URL, which Puma takes as is, and CONNECT, which
+      # Chromium uses for WebSockets such as Action Cable's, gets a tunnel to
+      # the app. HTTPS through it fails, so bypass the outside sites tests use.
+      class SystemTestsProxy
+        attr_reader :port
+
+        def initialize(app_port)
+          @app_port = app_port
+          @server = TCPServer.new("0.0.0.0", 0)
+          @port = @server.addr[1]
+          Thread.new { loop { Thread.new(@server.accept) { |client| tunnel(client) } } }
+        end
+
+        private
+          def tunnel(client)
+            head = +""
+            head << client.readpartial(16_384) until head.include?("\r\n\r\n")
+            if head.start_with?("CONNECT ")
+              client.write("HTTP/1.1 200 Connection established\r\n\r\n")
+              head = head.split("\r\n\r\n", 2).last
+            end
+            app = TCPSocket.new("127.0.0.1", @app_port)
+            app.write(head)
+            [[client, app], [app, client]].map { |from, to|
+              Thread.new { IO.copy_stream(from, to) rescue nil; to.close_write rescue nil }
+            }.each(&:join)
+          rescue IOError, SystemCallError
+          ensure
+            client.close rescue nil
+            app&.close rescue nil
+          end
+      end
+
+      # Capybara makes the driver before it starts the app's server, in each
+      # parallel test process, so the port picked here is the one it uses.
       Capybara.register_driver(:playwright_server) do |app|
+        url = URI(ENV.fetch("PLAYWRIGHT_SERVER_URL"))
+        unless ENV.fetch("SYSTEM_TESTS_PROXY", "on").casecmp?("off")
+          Capybara.server_port ||= TCPServer.new("0.0.0.0", 0).then { |s| s.addr[1].tap { s.close } }
+          proxy = { server: "http://#{SYSTEM_TESTS_HOST}:#{SystemTestsProxy.new(Capybara.server_port).port}" }
+          bypass = ENV["SYSTEM_TESTS_PROXY_BYPASS"].to_s.strip
+          proxy[:bypass] = bypass unless bypass.empty?
+          # The playwright server launches the browser with these options.
+          url.query = URI.encode_www_form(URI.decode_www_form(url.query.to_s) << ["launch-options", { proxy: }.to_json])
+        end
         Capybara::Playwright::Driver.new(app,
-          browser_server_endpoint_url: ENV.fetch("PLAYWRIGHT_SERVER_URL"),
+          browser_server_endpoint_url: url.to_s,
           browser_type: :chromium,
           headless: true)
       end
       Capybara.server_host = "0.0.0.0"
-      Capybara.app_host = "http://#{ENV.fetch("SYSTEM_TESTS_HOST") { Socket.gethostname }}"
+      Capybara.app_host = "http://#{SYSTEM_TESTS_HOST}"
       Capybara.always_include_port = true
 
       class ApplicationSystemTestCase < ActionDispatch::SystemTestCase
@@ -85,10 +142,21 @@ options:
         # Playwright's Trace Viewer: the Neptuno dashboard's Traces list opens
         # them. Each test's goes to tmp/playwright-traces/<test>.zip, next to a
         # .json that says how the test went. PLAYWRIGHT_TRACE picks which:
-        #   failed (default)  keep the traces of tests that fail
+        #   failed (default)  keep the traces of tests that fail, and of tests
+        #                     declared with trace: true
         #   all               keep every test's trace
         #   off               record none
+        # test "checkout", trace: true do ... end keeps that test's trace even
+        # when it passes.
         TRACES_DIR = Rails.root.join("tmp/playwright-traces")
+
+        def self.test(name, trace: false, &block)
+          super(name, &block).tap { |method| (@traced_tests ||= Set.new) << method.to_s if trace }
+        end
+
+        def self.traced_test?(method)
+          ancestors.any? { |klass| klass.instance_variable_get(:@traced_tests)&.include?(method) }
+        end
 
         setup do
           @playwright_trace = nil
@@ -115,7 +183,7 @@ options:
             result = if skipped? then "skipped" elsif passed? then "passed" elsif error? then "error" else "failed" end
             base = TRACES_DIR.join("#{self.class.name}##{name}".gsub(/[^A-Za-z0-9_.-]+/, "_")[0, 200])
             zip, json = Pathname("#{base}.zip"), Pathname("#{base}.json")
-            unless playwright_trace_mode == "all" || %w[failed error].include?(result)
+            unless playwright_trace_mode == "all" || self.class.traced_test?(name) || %w[failed error].include?(result)
               # Discard it, and an earlier failure's trace of this test.
               page.driver.stop_tracing
               FileUtils.rm_f([zip, json])

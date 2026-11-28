@@ -275,7 +275,13 @@ func TestAddWithPlaywrightAddsTheService(t *testing.T) {
 	for _, want := range []string{
 		"bundle add playwright-ruby-client --version '~> " + scaffold.PlaywrightMinor + "' --group test",
 		"bundle add capybara-playwright-driver --group test",
-		`browser_server_endpoint_url: ENV.fetch("PLAYWRIGHT_SERVER_URL")`,
+		`url = URI(ENV.fetch("PLAYWRIGHT_SERVER_URL"))`,
+		"browser_server_endpoint_url: url.to_s",
+		// The browser's proxy sends every host to the app under test.
+		`["launch-options", { proxy: }.to_json]`,
+		`ENV["SYSTEM_TESTS_PROXY_BYPASS"]`,
+		// test "...", trace: true keeps a passing test's trace.
+		"def self.test(name, trace: false, &block)",
 	} {
 		if !strings.Contains(generate, want) {
 			t.Errorf("generator lacks %q:\n%s", want, generate)

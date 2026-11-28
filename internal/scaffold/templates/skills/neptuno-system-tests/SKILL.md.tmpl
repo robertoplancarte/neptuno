@@ -1,0 +1,119 @@
+---
+name: neptuno-system-tests
+description: Set up, run or debug a repo's browser (system) tests against the project's shared Playwright service, including apps that serve subdomains or custom domains (multitenant apps), and keeping or reading Playwright traces. Use when system tests can't reach the app, a host doesn't resolve, or you need a trace of a test.
+---
+
+# Browser tests in {{.Name}}
+
+Repos' system tests drive Chromium in the `playwright` service, through its
+server at `PLAYWRIGHT_SERVER_URL` (`ws://playwright:3000/`). The browser is
+in that container, not the repo's, so two things differ from a laptop:
+
+- **The app under test** runs in the repo's container. Its test server
+  listens on `0.0.0.0`, and the browser reaches it by the repo's compose
+  name, `SYSTEM_TESTS_HOST` (such as `http://shop:<port>`), never
+  `localhost`.
+- **Hosts the app serves**, such as `acme.example.com` or
+  `acme.shop.localhost`, resolve nowhere in that container, and the
+  Playwright server drops Chromium flags such as `--host-resolver-rules`.
+  So the browser sends every request through a proxy instead: see below.
+
+## Run them
+
+```sh
+neptuno exec <repo> -- bin/rails test:system
+neptuno exec <repo> -- bin/rails test test/system/checkout_test.rb:42
+```
+
+`neptuno up <repo>` or `exec` starts the `playwright` service too. If the
+app returns 502s right after `neptuno restart`, wait until
+`http://<repo>.localhost/up` answers before running tests.
+
+## Subdomains and custom domains
+
+Rails repos made with the `playwright` option have
+`test/application_system_test_case.rb`, which picks the test server's port
+up front and starts a small proxy in the test process. The browser uses it
+as its HTTP proxy, passed to the Playwright server in the
+`launch-options` of the server URL, and it hands every request to the app
+under test whatever its host, WebSockets (Action Cable) included. So tests
+visit real-looking hosts with no DNS:
+
+```ruby
+visit "http://acme.example.com/"          # Capybara adds the port
+assert_text "Acme"
+```
+
+Rails sees `request.host == "acme.example.com"`, so subdomain and
+custom-domain routing work as in production. Point any URL the app builds
+for itself (mailer `default_url_options`, tenant domains) at the same hosts.
+
+The catch: outside sites (CDNs, fonts, third-party scripts) reach the app
+too, and HTTPS ones fail. The proxy is set by env in `environments/<repo>/`
+or per run:
+
+| Env | Effect |
+| --- | --- |
+| `SYSTEM_TESTS_PROXY=off` | no proxy; only `SYSTEM_TESTS_HOST` reaches the app |
+| `SYSTEM_TESTS_PROXY_BYPASS=*.googleapis.com,cdn.example.net` | those hosts go direct, comma-separated, `*` wildcards allowed |
+
+For a repo that predates this, copy the top half of that file (the
+`SystemTestsProxy` class and the `register_driver` block) from a new app
+made with `neptuno add <name> --stack rails --with playwright`.
+
+### RSpec
+
+The same setup works in `spec/support/system.rb`: keep the proxy class,
+`register_driver`, `server_host`, `app_host` and `always_include_port` as
+they are, and drive it per system spec:
+
+```ruby
+RSpec.configure do |config|
+  config.before(type: :system) { driven_by :playwright_server }
+end
+```
+
+### Other stacks
+
+The idea carries over: pick the test server's port, run a proxy that
+forwards every request (and tunnels `CONNECT`) to it, and connect with
+`PLAYWRIGHT_SERVER_URL` plus
+`?launch-options={"proxy":{"server":"http://<repo>:<proxy port>"}}`
+(URL-encoded). Node's `chromium.connect()` takes that URL as is.
+
+## Traces
+
+Each system test records a Playwright trace: every action with a screenshot,
+the DOM, console and network. They land in
+`repos/<repo>/tmp/playwright-traces/<test>.zip` with a `.json` beside it,
+and the dashboard's Traces list or
+`http://playwright.localhost/trace/` opens them.
+
+| `PLAYWRIGHT_TRACE` | Keeps |
+| --- | --- |
+| `failed` (default) | traces of tests that fail or error, and of tests declared with `trace: true` |
+| `all` | every test's trace |
+| `off` | none, and nothing is recorded |
+
+To keep a passing test's trace without changing the env, tag it:
+
+```ruby
+test "checkout", trace: true do
+  # ...
+end
+```
+
+In RSpec, `it "checks out", trace: true do` with the same check in the
+`after` hook that saves traces: `example.metadata[:trace]`.
+
+## When it doesn't work
+
+1. `Errno::ECONNREFUSED` or a blank page at `http://<repo>:<port>`: the
+   test server isn't on `0.0.0.0`, or `SYSTEM_TESTS_HOST` isn't the repo's
+   compose name. Check with `neptuno env show <repo>`.
+2. A connection error about the Playwright version: the test client must
+   match the server's minor version (`playwright-ruby-client` pins it).
+3. An outside asset fails to load: add its host to
+   `SYSTEM_TESTS_PROXY_BYPASS`.
+4. The browser hits the wrong server for a host: the proxy is off, or the
+   test builds a URL with an explicit port other than Capybara's.

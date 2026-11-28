@@ -139,6 +139,7 @@ func TestWriteAgentFiles(t *testing.T) {
 		".claude/skills/neptuno-add-repo/SKILL.md",
 		".claude/skills/neptuno-debug-service/SKILL.md",
 		".claude/skills/neptuno-delegate-to-repo/SKILL.md",
+		".claude/skills/neptuno-system-tests/SKILL.md",
 	}
 	if strings.Join(wrote, ",") != strings.Join(want, ",") {
 		t.Errorf("wrote %q, want %q", wrote, want)
