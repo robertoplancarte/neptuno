@@ -155,7 +155,7 @@ them with `--with` and `--without`). The `rails` stack has:
 | `mailpit` | on | Action Mailer in development delivers over SMTP to the project's Mailpit (`SMTP_HOST`, `SMTP_PORT`), so mail shows at `http://mailpit.localhost`; mail links point at `http://<name>.localhost` |
 | `action_text` | off | runs `bin/rails action_text:install` |
 | `storage_s3` | off | stores Active Storage uploads in the project's SeaweedFS: adds `aws-sdk-s3`, a `seaweedfs` service in `config/storage.yml`, the S3 env vars, and creates the bucket at container start |
-| `playwright` | off | system tests drive the project's shared Playwright browsers: adds `capybara-playwright-driver` and a `test/application_system_test_case.rb` that connects to them and keeps a Playwright trace of each failed test, and adds the `playwright` service if the project lacks it (see [Browser testing with Playwright](#browser-testing-with-playwright)) |
+| `playwright` | off | system tests drive the project's shared Playwright browsers: adds `capybara-playwright-driver` and a `test/application_system_test_case.rb` that connects to them, sends every browser request to the app under test so tests can visit any host, and keeps a Playwright trace of each failed test, and adds the `playwright` service if the project lacks it (see [Browser testing with Playwright](#browser-testing-with-playwright)) |
 
 ```sh
 neptuno add shop --stack rails --with action_text,storage_s3 --without tailwind
@@ -244,7 +244,37 @@ start it too. Screenshots of
 failures land in `repos/<repo>/tmp/screenshots` as usual. For a Rails repo
 you already have, run `neptuno init --services playwright`, add the two
 gems to its test group, and copy that file from a new app made with the
-option.
+option (its top half goes in `spec/support/system.rb` for RSpec).
+
+#### Subdomains and custom domains
+
+Apps that route by host, such as a multitenant app on `acme.example.com`,
+need tests to visit hosts that resolve nowhere in the `playwright`
+container, and its server drops Chromium flags such as
+`--host-resolver-rules`. So the file makes the app under test the browser's
+proxy: it picks the test server's port up front, starts a small proxy in the
+test process, and passes it to the Playwright server in the server URL's
+`launch-options`. Every request goes to the app whatever its host, Action
+Cable's WebSockets included, so a test can
+
+```ruby
+visit "http://acme.example.com/"   # Capybara adds the port
+```
+
+and Rails sees `request.host == "acme.example.com"`, as with
+`acme.shop.localhost`. Nothing in the app changes. The catch is that outside
+sites (CDNs, fonts) reach the app too, and HTTPS ones fail:
+
+| Env | Effect |
+| --- | --- |
+| `SYSTEM_TESTS_PROXY_BYPASS` | comma-separated hosts that go direct, such as `*.googleapis.com,cdn.example.net` |
+| `SYSTEM_TESTS_PROXY=off` | no proxy: only `SYSTEM_TESTS_HOST` reaches the app |
+
+A proxy fits better than DNS here: a wildcard resolver in the network could
+only answer for names Neptuno picks, such as `*.<repo>.test`, while the
+proxy takes any host the app serves, including custom domains, with no
+setup outside the test file. Projects get the `neptuno-system-tests` skill,
+which walks an agent through this, RSpec, other stacks and traces.
 
 #### Traces
 
@@ -255,9 +285,18 @@ picks which traces are kept:
 
 | `PLAYWRIGHT_TRACE` | Keeps |
 | --- | --- |
-| `failed` (default) | the traces of tests that fail or error; a test that passes drops its earlier one |
+| `failed` (default) | the traces of tests that fail or error, and of tests declared with `trace: true`; any other test that passes drops its earlier one |
 | `all` | every test's trace |
 | `off` | none, and nothing is recorded |
+
+To keep one passing test's trace, declare it with `trace: true`, instead of
+setting `PLAYWRIGHT_TRACE=all` for the whole run:
+
+```ruby
+test "checkout", trace: true do
+  # ...
+end
+```
 
 Choose which tests run the usual Rails way, and each one that runs saves its
 own trace:
@@ -700,7 +739,7 @@ folder how the project works, in formats more than one tool reads:
 | `CLAUDE.md` | Claude Code | `@AGENTS.md`, which imports it, plus any notes only for Claude |
 | `.claude/settings.json` | Claude Code | the permission rules above |
 | `.claude/agents/<repo>.md` | Claude Code | each repo's subagent |
-| `.claude/skills/<name>/SKILL.md` | Claude Code, and other tools that support Agent Skills | `neptuno-add-repo`, `neptuno-debug-service` and `neptuno-delegate-to-repo`: step-by-step guides loaded only when a task needs one |
+| `.claude/skills/<name>/SKILL.md` | Claude Code, and other tools that support Agent Skills | `neptuno-add-repo`, `neptuno-debug-service`, `neptuno-delegate-to-repo` and `neptuno-system-tests`: step-by-step guides loaded only when a task needs one |
 
 They are yours to edit: add your team's conventions to `AGENTS.md` and your
 own skills next to Neptuno's. `neptuno mcp sync` writes any that are

@@ -96,8 +96,23 @@ opens `http://<repo>.localhost` just as a browser on this machine does. Use
 it to click through a change and check it works. After a navigation, call
 its snapshot tool to read the page.
 
+### Testing apps that serve several hosts
+
+Repos' system tests use browsers in the same container, at
+`PLAYWRIGHT_SERVER_URL`, and reach the app under test by the repo's compose
+name (`SYSTEM_TESTS_HOST`), not `localhost`. Hosts a multitenant app serves,
+such as `acme.example.com`, resolve nowhere there, so Rails repos made with
+the `playwright` option send every browser request through a proxy to the
+app under test: tests `visit "http://acme.example.com/"` and Rails sees that
+host. Outside sites then reach the app too; list the ones tests need in
+`SYSTEM_TESTS_PROXY_BYPASS`, or turn the proxy off with
+`SYSTEM_TESTS_PROXY=off`. Failed tests keep a Playwright trace in
+`repos/<repo>/tmp/playwright-traces`, and `test "...", trace: true` keeps a
+passing one's. The `neptuno-system-tests` skill has the details, RSpec and
+other stacks.
+
 ## Skills
 
 `.claude/skills/` holds step-by-step guides for common jobs here: adding a
-repo, debugging a service that won't come up, and handing a task to a
-repo's subagent. Each `SKILL.md` starts with a description of when to use it.
+repo, debugging a service that won't come up, handing a task to a repo's
+subagent, and setting up or debugging browser tests. Each `SKILL.md` starts with a description of when to use it.
