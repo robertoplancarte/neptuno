@@ -69,6 +69,9 @@ func (m *dashboard) availableActions() []menuAction {
 			add("m", "Copy or add "+r.Name+"'s MCP servers", "")
 		}
 	}
+	if r.Build {
+		add("b", "Rebuild "+r.Name+"'s image and recreate its container", "")
+	}
 	sel := "Select " + r.Name + " for up and stop"
 	if m.selected[r.Name] {
 		sel = "Unselect " + r.Name

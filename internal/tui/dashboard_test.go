@@ -20,7 +20,7 @@ import (
 
 func dashboardRows() []orchestrate.ServiceStatus {
 	return []orchestrate.ServiceStatus{
-		{Name: "api", Repo: true, RunMode: "container", Container: "running", Overmind: true, Window: true, Env: "local", Envs: []string{"local", "staging", "production"},
+		{Name: "api", Repo: true, RunMode: "container", Build: true, Container: "running", Overmind: true, Window: true, Env: "local", Envs: []string{"local", "staging", "production"},
 			Processes: []orchestrate.ProcessStatus{{Name: "web", Status: "running"}, {Name: "worker", Status: "running"}},
 			Git: &orchestrate.GitStatus{Branch: "main", Commit: "abc1234", Subject: "Add login", Author: "Roberto",
 				Date: time.Date(2026, 10, 30, 12, 0, 0, 0, time.Local)}},

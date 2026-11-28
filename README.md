@@ -300,6 +300,14 @@ them again. Run with no arguments inside a repo's folder under `environments/`,
 that repo. You need Docker or Podman (see [Podman](#podman)), tmux and
 [overmind](https://github.com/DarthSim/overmind) installed.
 
+After changing a Dockerfile, `neptuno rebuild [service...]` builds the
+image again with `docker compose build` (or Podman's), recreates the
+container from it and restarts the repo's processes; its dependencies start
+as with `up` but aren't rebuilt. `--no-cache` skips the build cache and
+`--pull` fetches newer base images. With no arguments it rebuilds the repo
+whose folder you are in, or shows a menu of the services `compose.yml`
+builds.
+
 Overmind runs in the background with `--any-can-die`, so a process that
 crashes or exits leaves the rest running, and it gives every process its own
 tmux window. A repo's window shows those per-process windows; overmind's tmux
@@ -410,7 +418,7 @@ database, migrates and seeds it. For a one-off reset, run
 new app over a database an earlier app of the same name left, the first start
 renames its old development and test databases (named in `config/database.yml`)
 to `<database>_old_<time>` instead of failing on tables that already exist.
-Rebuild the image (`docker compose build <repo>`) after changing it.
+Rebuild the image with `neptuno rebuild <repo>` after changing it.
 
 ## Dashboard
 
@@ -466,6 +474,7 @@ to a plain list.
 | `space` | select rows; `a` selects all |
 | `enter` | open the repo's window |
 | `u` | start the selected rows, or the one under the cursor (`neptuno up -d`) |
+| `b` | rebuild the image of the service under the cursor and recreate its container (`neptuno rebuild -d`) |
 | `s` | stop them (`neptuno down`) |
 | `r` | restart a repo's processes |
 | `e` | switch a repo's env, then restart it if it is running |
@@ -624,7 +633,7 @@ the repos' containers with `neptuno claude <repo>`. In such a project:
   versions, `.claude/settings.json` and the repos' subagents.
 - Optionally drop `"./.neptuno/claude:/root/.claude"` from the repos'
   `volumes` in `compose.yml` and the Claude Code lines from
-  `dockerfiles/<repo>/Dockerfile`, then `docker compose build <repo>`.
+  `dockerfiles/<repo>/Dockerfile`, then `neptuno rebuild <repo>`.
   `.neptuno/claude` can go too.
 
 ## MCP servers your repos serve
@@ -699,6 +708,7 @@ tools:
 | --- | --- |
 | `neptuno_status` | what `neptuno status` prints |
 | `neptuno_up`, `neptuno_down`, `neptuno_restart` | start, stop and restart repos and services |
+| `neptuno_rebuild` | rebuild images after a Dockerfile change and recreate their containers |
 | `neptuno_exec` | run a shell command in a repo's container with `neptuno exec` (or in `repos/<repo>` for `run: host`) |
 | `neptuno_logs` | the end of a container's output |
 | `neptuno_ask_repo_claude` | hand a task to the repo's subagent, through `claude -p` on your machine, and return its answer |

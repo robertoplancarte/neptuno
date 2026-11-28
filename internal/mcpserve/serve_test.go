@@ -158,6 +158,7 @@ func TestOwnTools(t *testing.T) {
 		return res
 	}
 	call("neptuno_up", map[string]any{"services": []string{"locke"}})
+	call("neptuno_rebuild", map[string]any{"services": []string{"locke"}, "no_cache": true})
 	call("neptuno_exec", map[string]any{"repo": "locke", "command": "bin/rails test"})
 	call("neptuno_exec", map[string]any{"repo": "docs", "command": "npm test"})
 	call("neptuno_ask_repo_claude", map[string]any{"repo": "locke", "task": "fix the build"})
@@ -167,6 +168,7 @@ func TestOwnTools(t *testing.T) {
 	}
 	want := []string{
 		"/p: /bin/neptuno up --detach locke",
+		"/p: /bin/neptuno rebuild --detach --no-cache locke",
 		"/p: /bin/neptuno exec locke -- bin/rails test",
 		"/p: /bin/neptuno exec docs -- npm test",
 		"/p: claude -p Use the locke subagent for this task, then report what it did and found.\n\nfix the build",
