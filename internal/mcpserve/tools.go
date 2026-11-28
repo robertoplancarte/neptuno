@@ -77,7 +77,7 @@ func (s *Server) addOwnTools() {
 
 	sdk.AddTool(s.Server, &sdk.Tool{
 		Name:        "neptuno_restart",
-		Description: "Restarts a running repo's Procfile processes, or one of them with repo:process.",
+		Description: "Restarts a running repo's Procfile processes, or one of them with repo:process, then waits until they run again and the app answers its health check through the proxy (/up for Rails), so tests can run right after it. A repo with stray overmind daemons gets them replaced with one.",
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in restartArgs) (*sdk.CallToolResult, any, error) {
 		out, err := s.neptuno(ctx, "restart", in.Target)
 		return textResult(out, err), nil, nil
